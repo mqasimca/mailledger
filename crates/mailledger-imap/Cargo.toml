@@ -8,6 +8,7 @@ authors.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
+readme = "README.md"
 keywords = ["imap", "email", "mail", "client", "async"]
 categories = ["email", "network-programming", "asynchronous"]
 
