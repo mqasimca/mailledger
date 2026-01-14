@@ -1,0 +1,28 @@
+# Build artifacts
+/target/
+
+# Local planning documents
+local/
+
+# Claude Code local settings (personal, not shared)
+.claude/settings.local.json
+
+# Auto-generated CLAUDE.md in subdirectories (keep root one)
+**/CLAUDE.md
+!/CLAUDE.md
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key

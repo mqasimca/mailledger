@@ -1,0 +1,30 @@
+[package]
+name = "mailledger-imap"
+description = "Production-quality IMAP client library implementing RFC 9051 (IMAP4rev2)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["imap", "email", "mail", "client", "async"]
+categories = ["email", "network-programming", "asynchronous"]
+
+[dependencies]
+mailledger-oauth = { workspace = true }
+tokio = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+webpki-roots = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros"] }
+tokio-test = { workspace = true }
+
+[lints]
+workspace = true

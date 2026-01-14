@@ -1,0 +1,36 @@
+[package]
+name = "mailledger-mime"
+description = "MIME message parsing and generation library for email"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["mime", "email", "parser", "rfc2045", "multipart"]
+categories = ["email", "parser-implementations", "encoding"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# Error handling
+thiserror.workspace = true
+
+# Encoding
+base64 = "0.22"
+
+# Date/time
+chrono = { workspace = true, features = ["serde"] }
+
+# Serialization (for convenience APIs)
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Testing
+proptest.workspace = true
+
+[features]
+default = []
+serde = ["dep:serde"]

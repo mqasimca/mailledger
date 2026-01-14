@@ -1,0 +1,35 @@
+[package]
+name = "mailledger-oauth"
+description = "OAuth2 authentication library for email protocols"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["oauth2", "authentication", "email"]
+categories = ["authentication", "email"]
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+
+# Additional deps
+base64 = "0.22"
+url = "2"
+reqwest = { version = "0.12", features = ["json"] }
+sha2 = "0.10"
+rand = "0.8"
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+
+[lints]
+workspace = true

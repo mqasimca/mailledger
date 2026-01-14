@@ -1,0 +1,31 @@
+[package]
+name = "mailledger"
+description = "Cross-platform desktop email client with custom IMAP implementation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["email", "mail", "client", "imap", "desktop"]
+categories = ["email", "gui"]
+
+[[bin]]
+name = "mailledger"
+path = "src/main.rs"
+
+[dependencies]
+mailledger-imap = { workspace = true }
+mailledger-core = { workspace = true }
+tokio = { workspace = true }
+iced = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+dirs = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,198 @@
+//! Button style functions with theme support.
+
+use iced::widget::button;
+use iced::{Background, Border, Color};
+
+use super::palette;
+use super::shadows;
+use super::shadows::radius;
+
+/// Primary button style - flat terminal style with minimal rounding.
+pub fn primary_button_style(_theme: &iced::Theme, status: button::Status) -> button::Style {
+    let p = palette::current();
+
+    let base = button::Style {
+        background: Some(Background::Color(p.primary)),
+        text_color: p.text_on_primary,
+        border: Border {
+            color: p.primary,
+            width: 1.0,                    // Subtle border
+            radius: radius::MEDIUM.into(), // Minimal rounding
+        },
+        shadow: shadows::none(), // No shadows in terminal UI
+        snap: false,
+    };
+
+    match status {
+        button::Status::Active => base,
+        button::Status::Hovered => button::Style {
+            background: Some(Background::Color(p.primary_light)),
+            border: Border {
+                color: p.primary_light,
+                width: 1.0,
+                radius: radius::MEDIUM.into(),
+            },
+            ..base
+        },
+        button::Status::Pressed => button::Style {
+            background: Some(Background::Color(p.primary_dark)),
+            ..base
+        },
+        button::Status::Disabled => button::Style {
+            background: Some(Background::Color(p.text_muted)),
+            text_color: p.surface,
+            ..base
+        },
+    }
+}
+
+/// Secondary/ghost button style - rounded with subtle hover.
+pub fn secondary_button_style(_theme: &iced::Theme, status: button::Status) -> button::Style {
+    let p = palette::current();
+
+    let base = button::Style {
+        background: Some(Background::Color(Color::TRANSPARENT)),
+        text_color: p.text_primary,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: radius::LARGE.into(), // More rounded
+        },
+        shadow: shadows::none(),
+        snap: false,
+    };
+
+    match status {
+        button::Status::Active | button::Status::Disabled => base,
+        button::Status::Hovered => button::Style {
+            background: Some(Background::Color(p.hover)),
+            border: Border {
+                color: p.border_subtle,
+                width: 1.0,
+                radius: radius::LARGE.into(),
+            },
+            ..base
+        },
+        button::Status::Pressed => button::Style {
+            background: Some(Background::Color(p.selected)),
+            ..base
+        },
+    }
+}
+
+/// Folder item button style - modern rounded.
+pub fn folder_button_style(_theme: &iced::Theme, status: button::Status) -> button::Style {
+    let p = palette::current();
+
+    let base = button::Style {
+        background: Some(Background::Color(Color::TRANSPARENT)),
+        text_color: p.text_primary,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: radius::MEDIUM.into(), // More rounded
+        },
+        shadow: shadows::none(),
+        snap: false,
+    };
+
+    match status {
+        button::Status::Active | button::Status::Disabled => base,
+        button::Status::Hovered => button::Style {
+            background: Some(Background::Color(p.hover)),
+            border: Border {
+                color: p.border_subtle,
+                width: 1.0,
+                radius: radius::MEDIUM.into(),
+            },
+            ..base
+        },
+        button::Status::Pressed => button::Style {
+            background: Some(Background::Color(p.selected)),
+            ..base
+        },
+    }
+}
+
+/// Selected folder button style - terminal highlight.
+pub fn folder_button_selected_style(_theme: &iced::Theme, status: button::Status) -> button::Style {
+    let p = palette::current();
+
+    let base = button::Style {
+        background: Some(Background::Color(p.selected)),
+        text_color: p.primary,
+        border: Border {
+            color: p.selected_border,
+            width: 1.0, // Consistent border width
+            radius: radius::MEDIUM.into(),
+        },
+        shadow: shadows::none(), // No shadows in terminal UI
+        snap: false,
+    };
+
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(Background::Color(p.hover)),
+            ..base
+        },
+        _ => base,
+    }
+}
+
+/// Message row button style - normal.
+pub fn message_button_style(_theme: &iced::Theme, status: button::Status) -> button::Style {
+    let p = palette::current();
+
+    let base = button::Style {
+        background: Some(Background::Color(Color::TRANSPARENT)),
+        text_color: p.text_primary,
+        border: Border::default(),
+        shadow: shadows::none(),
+        snap: false,
+    };
+
+    match status {
+        button::Status::Active | button::Status::Disabled => base,
+        button::Status::Hovered => button::Style {
+            background: Some(Background::Color(p.hover)),
+            ..base
+        },
+        button::Status::Pressed => button::Style {
+            background: Some(Background::Color(p.selected)),
+            ..base
+        },
+    }
+}
+
+/// Toolbar button style.
+pub fn toolbar_button_style(_theme: &iced::Theme, status: button::Status) -> button::Style {
+    let p = palette::current();
+
+    let base = button::Style {
+        background: Some(Background::Color(p.surface)),
+        text_color: p.text_primary,
+        border: Border {
+            color: p.border_subtle,
+            width: 1.0,
+            radius: radius::MEDIUM.into(),
+        },
+        shadow: shadows::none(), // No shadows in terminal UI
+        snap: false,
+    };
+
+    match status {
+        button::Status::Active => base,
+        button::Status::Hovered => button::Style {
+            background: Some(Background::Color(p.hover)),
+            ..base
+        },
+        button::Status::Pressed => button::Style {
+            background: Some(Background::Color(p.selected)),
+            ..base
+        },
+        button::Status::Disabled => button::Style {
+            text_color: p.text_muted,
+            ..base
+        },
+    }
+}

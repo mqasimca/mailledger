@@ -1,0 +1,32 @@
+[package]
+name = "mailledger-core"
+description = "Core business logic and services for MailLedger email client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["email", "mail", "client", "storage"]
+categories = ["email"]
+
+[dependencies]
+mailledger-imap = { workspace = true }
+mailledger-mime = { workspace = true }
+mailledger-smtp = { workspace = true }
+mailledger-oauth = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+sqlx = { workspace = true }
+keyring = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+
+[lints]
+workspace = true

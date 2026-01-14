@@ -1,0 +1,51 @@
+# Build artifacts
+target/
+*.rlib
+*.rmeta
+
+# Dependencies
+Cargo.lock
+
+# Local planning documents
+local/
+
+# Claude Code local settings (personal, not shared)
+.claude/settings.local.json
+
+# Auto-generated CLAUDE.md in subdirectories (keep root one)
+**/CLAUDE.md
+!CLAUDE.md
+
+# IDE/Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Large binary files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.woff
+*.woff2
+*.ttf
+*.eot
+
+# Test fixtures (read only when needed)
+tests/fixtures/
+
+# Documentation build
+docs/build/

@@ -1,0 +1,31 @@
+[package]
+name = "mailledger-smtp"
+description = "Production-quality SMTP client library implementing RFC 5321"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["smtp", "email", "mail", "client"]
+categories = ["email", "network-programming"]
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+webpki-roots = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Additional deps
+base64 = "0.22"
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true
