@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 license = "MIT"
 authors = ["mqasimca"]
@@ -24,11 +24,11 @@ categories = ["email", "network-programming"]
 
 [workspace.dependencies]
 # Internal crates (version required for crates.io publishing)
-mailledger-imap = { path = "crates/mailledger-imap", version = "0.0.1" }
-mailledger-mime = { path = "crates/mailledger-mime", version = "0.0.1" }
-mailledger-smtp = { path = "crates/mailledger-smtp", version = "0.0.1" }
-mailledger-oauth = { path = "crates/mailledger-oauth", version = "0.0.1" }
-mailledger-core = { path = "crates/mailledger-core", version = "0.0.1" }
+mailledger-imap = { path = "crates/mailledger-imap", version = "0.0.2" }
+mailledger-mime = { path = "crates/mailledger-mime", version = "0.0.2" }
+mailledger-smtp = { path = "crates/mailledger-smtp", version = "0.0.2" }
+mailledger-oauth = { path = "crates/mailledger-oauth", version = "0.0.2" }
+mailledger-core = { path = "crates/mailledger-core", version = "0.0.2" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

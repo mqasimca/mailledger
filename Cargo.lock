@@ -2564,7 +2564,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "mailledger"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2584,7 +2584,7 @@ dependencies = [
 
 [[package]]
 name = "mailledger-core"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "chrono",
  "keyring",
@@ -2602,7 +2602,7 @@ dependencies = [
 
 [[package]]
 name = "mailledger-imap"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bytes",
  "mailledger-oauth",
@@ -2618,7 +2618,7 @@ dependencies = [
 
 [[package]]
 name = "mailledger-mime"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "base64",
  "chrono",
@@ -2629,7 +2629,7 @@ dependencies = [
 
 [[package]]
 name = "mailledger-oauth"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "base64",
@@ -2647,7 +2647,7 @@ dependencies = [
 
 [[package]]
 name = "mailledger-smtp"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "base64",
  "rustls",
