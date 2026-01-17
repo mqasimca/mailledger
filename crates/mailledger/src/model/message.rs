@@ -1,6 +1,7 @@
 //! Message data models.
 
 use super::FolderId;
+use chrono::{DateTime, Local};
 
 /// Parses a "from" field into name and email parts.
 fn parse_from_field(from: &str) -> (String, String) {
@@ -18,6 +19,29 @@ fn parse_from_field(from: &str) -> (String, String) {
     }
     // Just an email address
     (from.to_string(), from.to_string())
+}
+
+/// Formats an RFC 2822 date string to local time.
+///
+/// Converts dates like "Thu, 15 Jan 2026 19:31:43 +0000" to local timezone
+/// and formats as "Thu, 15 Jan 2026 14:31:43" (example for EST).
+fn format_date_local(rfc2822_date: &str) -> String {
+    // Try to parse the RFC 2822 date
+    if let Ok(dt) = DateTime::parse_from_rfc2822(rfc2822_date) {
+        // Convert to local timezone
+        let local: DateTime<Local> = dt.with_timezone(&Local);
+        // Format as "Day, DD Mon YYYY HH:MM:SS"
+        return local.format("%a, %d %b %Y %H:%M:%S").to_string();
+    }
+
+    // If parsing fails, try parsing as RFC 3339 (another common format)
+    if let Ok(dt) = DateTime::parse_from_rfc3339(rfc2822_date) {
+        let local: DateTime<Local> = dt.with_timezone(&Local);
+        return local.format("%a, %d %b %Y %H:%M:%S").to_string();
+    }
+
+    // If all parsing fails, return the original string
+    rfc2822_date.to_string()
 }
 
 /// Unique identifier for a message.
@@ -89,7 +113,7 @@ impl MessageSummary {
             from_email,
             subject: core_msg.subject.clone(),
             snippet: core_msg.snippet.clone(),
-            date: core_msg.date.clone(),
+            date: format_date_local(&core_msg.date),
             is_read: core_msg.is_read,
             is_flagged: core_msg.is_flagged,
             has_attachments: core_msg.has_attachment,
@@ -178,7 +202,7 @@ impl MessageContent {
             to: core_content.to.clone(),
             cc: core_content.cc.clone(),
             subject: core_content.subject.clone(),
-            date: core_content.date.clone(),
+            date: format_date_local(&core_content.date),
             body_text: core_content.body_text.clone(),
             body_html: core_content.body_html.clone(),
         }

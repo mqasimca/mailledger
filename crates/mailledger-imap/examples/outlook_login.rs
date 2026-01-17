@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used, clippy::doc_markdown, clippy::uninlined_format_args)]
 //! Example: Connect to Outlook IMAP with username and password
 //!
 //! This example demonstrates basic LOGIN authentication with Microsoft Outlook.

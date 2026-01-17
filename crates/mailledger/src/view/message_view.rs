@@ -1,18 +1,21 @@
 //! Message content view component with polished styling.
 
-use iced::widget::{Column, button, column, container, row, scrollable, text};
-use iced::{Element, Length};
+use iced::widget::{Column, button, column, container, image, row, scrollable, text};
+use iced::{ContentFit, Element, Length};
 
 use crate::message::Message;
-use crate::model::MessageContent;
+use crate::model::{InlineImage, InlineImageState, MessageContent};
 use crate::style::widgets::{
     message_content_style, message_header_style, palette, scrollable_style, toolbar_button_style,
     toolbar_style,
 };
 
 /// Renders the message content panel (right pane) with polished styling.
-pub fn view_message_content(content: Option<&MessageContent>) -> Element<'static, Message> {
-    content.map_or_else(view_empty, view_message)
+pub fn view_message_content(
+    content: Option<&MessageContent>,
+    inline_images: &[InlineImage],
+) -> Element<'static, Message> {
+    content.map_or_else(view_empty, |msg| view_message(msg, inline_images))
 }
 
 /// Renders empty state when no message is selected.
@@ -39,15 +42,15 @@ fn view_empty() -> Element<'static, Message> {
 }
 
 /// Renders message content with polished styling.
-fn view_message(msg: &MessageContent) -> Element<'static, Message> {
+fn view_message(msg: &MessageContent, inline_images: &[InlineImage]) -> Element<'static, Message> {
     // Action toolbar
-    let toolbar = view_toolbar();
+    let toolbar = view_toolbar(msg.body_html.is_some());
 
     // Header section
     let header = view_header(msg);
 
     // Body content
-    let body = view_body(msg);
+    let body = view_body(msg, inline_images);
 
     let content = column![
         toolbar,
@@ -67,7 +70,7 @@ fn view_message(msg: &MessageContent) -> Element<'static, Message> {
 }
 
 /// Renders the message action toolbar with polished buttons.
-fn view_toolbar() -> Element<'static, Message> {
+fn view_toolbar(has_html: bool) -> Element<'static, Message> {
     let reply_btn = button(
         row![
             text("\u{21A9}").size(14),
@@ -123,12 +126,28 @@ fn view_toolbar() -> Element<'static, Message> {
     .style(toolbar_button_style)
     .on_press(Message::DeleteSelected);
 
+    let view_html_btn = button(text("View HTML").size(14))
+        .padding([8, 14])
+        .style(toolbar_button_style)
+        .on_press_maybe(if has_html {
+            Some(Message::OpenHtml)
+        } else {
+            None
+        });
+
     let spacer = iced::widget::Space::new().width(Length::Fill);
 
-    let toolbar = row![reply_btn, reply_all_btn, forward_btn, spacer, delete_btn]
-        .spacing(8)
-        .padding([12, 20])
-        .align_y(iced::Alignment::Center);
+    let toolbar = row![
+        reply_btn,
+        reply_all_btn,
+        forward_btn,
+        view_html_btn,
+        spacer,
+        delete_btn
+    ]
+    .spacing(8)
+    .padding([12, 20])
+    .align_y(iced::Alignment::Center);
 
     container(toolbar)
         .width(Length::Fill)
@@ -211,7 +230,7 @@ fn view_field_row(label: &str, value: &str) -> Element<'static, Message> {
 }
 
 /// Renders the message body with polished styling.
-fn view_body(msg: &MessageContent) -> Element<'static, Message> {
+fn view_body(msg: &MessageContent, inline_images: &[InlineImage]) -> Element<'static, Message> {
     // Prefer plain text, fall back to HTML converted to text
     let body_text = if let Some(plain) = msg.body_text.as_ref()
         && !plain.trim().is_empty()
@@ -230,11 +249,49 @@ fn view_body(msg: &MessageContent) -> Element<'static, Message> {
         }
     });
 
-    container(body)
+    let mut content = column![body].spacing(16);
+
+    if !inline_images.is_empty() {
+        let images = Column::with_children(
+            inline_images
+                .iter()
+                .map(|img| view_inline_image(img))
+                .collect::<Vec<_>>(),
+        )
+        .spacing(12);
+
+        content = content.push(images);
+    }
+
+    container(content)
         .width(Length::Fill)
         .padding([20, 24])
         .style(message_content_style)
         .into()
+}
+
+fn view_inline_image(image_entry: &InlineImage) -> Element<'static, Message> {
+    let p = palette::current();
+    match &image_entry.state {
+        InlineImageState::Loading => text("Loading image...")
+            .size(13)
+            .style(move |_theme| text::Style {
+                color: Some(p.text_muted),
+            })
+            .into(),
+        InlineImageState::Failed(err) => text(format!("Image failed to load: {err}"))
+            .size(13)
+            .style(move |_theme| text::Style {
+                color: Some(p.accent_red),
+            })
+            .into(),
+        InlineImageState::Ready(handle) => container(
+            image(handle.clone())
+                .width(Length::Fixed(200.0))
+                .content_fit(ContentFit::ScaleDown),
+        )
+        .into(),
+    }
 }
 
 /// Convert HTML to plain text for display.

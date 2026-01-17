@@ -47,6 +47,7 @@ iced = { version = "0.14", default-features = false, features = [
     "tokio",
     "web-colors",
     "crisp",
+    "image",
 ] }
 
 # Error handling
@@ -60,6 +61,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+opener = "0.7"
 
 # Date/Time
 chrono = { version = "0.4", features = ["serde"] }
@@ -71,11 +74,28 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 dirs = "6"
 
 # Secure credential storage
-keyring = "3"
+# On Linux: uses Secret Service (GNOME Keyring, KWallet via D-Bus)
+# crypto-rust provides pure Rust encryption for Secret Service
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 
 # Testing
 proptest = "1"
 tokio-test = "0.4"
+
+# Optimization profiles
+[profile.release]
+lto = "thin"           # Link-time optimization for better performance
+codegen-units = 1      # Better optimization at the cost of compile time
+strip = true           # Strip symbols for smaller binary size
+opt-level = 3          # Maximum optimization
+
+# Fast development builds with some optimizations
+[profile.dev-release]
+inherits = "release"
+lto = false
+codegen-units = 16
+strip = false
+opt-level = 2
 
 [workspace.lints.rust]
 unsafe_code = "warn"

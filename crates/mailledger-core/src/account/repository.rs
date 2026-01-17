@@ -193,7 +193,7 @@ impl AccountRepository {
             .await?;
 
             // Store passwords in keyring
-            store_passwords_in_keyring(id, &account.imap.password, &account.smtp.password);
+            store_passwords_in_keyring(id, &account.imap.password, &account.smtp.password)?;
         } else {
             // Insert new
             let result = sqlx::query(
@@ -226,7 +226,7 @@ impl AccountRepository {
             account.id = Some(new_id);
 
             // Store passwords in keyring
-            store_passwords_in_keyring(new_id, &account.imap.password, &account.smtp.password);
+            store_passwords_in_keyring(new_id, &account.imap.password, &account.smtp.password)?;
         }
 
         // If this account is default, unset others
@@ -298,14 +298,19 @@ fn row_to_account(row: &sqlx::sqlite::SqliteRow) -> Account {
 }
 
 /// Store passwords securely in the system keyring.
-fn store_passwords_in_keyring(account_id: AccountId, imap_password: &str, smtp_password: &str) {
-    if let Err(e) = credentials::store_imap_password(account_id, imap_password) {
-        warn!("Failed to store IMAP password in keyring: {e}");
-    }
-    if let Err(e) = credentials::store_smtp_password(account_id, smtp_password) {
-        warn!("Failed to store SMTP password in keyring: {e}");
-    }
+///
+/// # Errors
+///
+/// Returns an error if storing either password fails.
+fn store_passwords_in_keyring(
+    account_id: AccountId,
+    imap_password: &str,
+    smtp_password: &str,
+) -> crate::Result<()> {
+    credentials::store_imap_password(account_id, imap_password)?;
+    credentials::store_smtp_password(account_id, smtp_password)?;
     debug!("Stored credentials in keyring for account {}", account_id.0);
+    Ok(())
 }
 
 /// Load passwords from keyring with fallback to database.
@@ -383,6 +388,7 @@ fn string_to_security(s: &str) -> Security {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::redundant_clone, clippy::manual_string_new, clippy::needless_collect, clippy::unreadable_literal, clippy::used_underscore_items, clippy::similar_names)]
 mod tests {
     use super::*;
 

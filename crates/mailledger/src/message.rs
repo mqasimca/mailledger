@@ -20,6 +20,8 @@ pub enum Message {
     SelectFolder(FolderId),
     /// Refresh folder list.
     RefreshFolders,
+    /// Refresh messages in the current folder.
+    RefreshMessages,
 
     // Message List Operations
     /// Select a message to view its content.
@@ -74,6 +76,17 @@ pub enum Message {
     MessagesLoaded(Result<Vec<MessageSummary>, String>),
     /// Message content loaded from IMAP server.
     MessageContentLoaded(Result<Option<crate::model::MessageContent>, String>),
+    /// Open the current message HTML in an external viewer.
+    OpenHtml,
+    /// HTML open completed.
+    HtmlOpened(Result<(), String>),
+    /// Inline image loaded from a remote source.
+    InlineImageLoaded {
+        /// Image source URL.
+        url: String,
+        /// Image bytes or error.
+        result: Result<Vec<u8>, String>,
+    },
 
     // IDLE Operations
     /// Start IDLE monitoring on the current folder.

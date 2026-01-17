@@ -176,11 +176,29 @@ pub async fn connect_and_login(account: &Account) -> Result<AuthClient, MailServ
             .await
             .map_err(|e| MailServiceError::Connection(e.to_string()))?;
 
-    // Authenticate
-    let auth_client = client
-        .login(&account.imap.username, &account.imap.password)
-        .await
-        .map_err(|e| MailServiceError::Authentication(e.to_string()))?;
+    // Authenticate - try LOGIN first, fallback to AUTHENTICATE PLAIN if needed
+    let auth_client = if !client.login_disabled() {
+        // Try LOGIN command first (more compatible with some servers)
+        match client
+            .login(&account.imap.username, &account.imap.password)
+            .await
+        {
+            Ok(authenticated) => authenticated,
+            Err(e) => {
+                return Err(MailServiceError::Authentication(e.to_string()));
+            }
+        }
+    } else if client.supports_auth_plain() {
+        // Fallback to AUTHENTICATE PLAIN if LOGIN is disabled
+        client
+            .authenticate_plain(&account.imap.username, &account.imap.password)
+            .await
+            .map_err(|e| MailServiceError::Authentication(e.to_string()))?
+    } else {
+        return Err(MailServiceError::Authentication(
+            "No supported authentication method available".to_string(),
+        ));
+    };
 
     Ok(auth_client)
 }
@@ -304,7 +322,7 @@ pub async fn fetch_messages(
                 has_attachment: false, // Would need BODYSTRUCTURE to detect
                 snippet: body_text
                     .as_ref()
-                    .map(|b| truncate_text(&String::from_utf8_lossy(b), 100))
+                    .map(|b| truncate_text(&extract_text_snippet(b), 100))
                     .unwrap_or_default(),
             });
         }
@@ -404,6 +422,67 @@ fn truncate_text(text: &str, max_len: usize) -> String {
     } else {
         cleaned
     }
+}
+
+/// Extract readable text from raw message body data.
+///
+/// This handles both single-part messages and multipart messages by
+/// extracting the first text/plain content from MIME parts.
+fn extract_text_snippet(raw_body: &[u8]) -> String {
+    let body_str = String::from_utf8_lossy(raw_body);
+    let trimmed = body_str.trim();
+
+    // Check if this is multipart (starts with MIME boundary)
+    if trimmed.starts_with("--") {
+        // Extract the boundary from the first line
+        let first_line_end = trimmed.find('\n').unwrap_or(trimmed.len());
+        let boundary = trimmed[2..first_line_end].trim().trim_end_matches('\r');
+
+        // Find text/plain part
+        if let Some(text) = extract_text_plain_from_multipart(&body_str, boundary) {
+            return text;
+        }
+    }
+
+    // Not multipart or no text/plain found - return as-is
+    body_str.to_string()
+}
+
+/// Extract the text/plain content from a multipart body.
+fn extract_text_plain_from_multipart(body: &str, boundary: &str) -> Option<String> {
+    let delimiter = format!("--{boundary}");
+
+    for part in body.split(&delimiter) {
+        let trimmed = part.trim();
+
+        // Skip empty parts and closing boundary
+        if trimmed.is_empty() || trimmed == "--" || trimmed.starts_with("--") {
+            continue;
+        }
+
+        // Split this part into headers and content
+        let (part_headers, part_content) = split_headers_body(trimmed);
+
+        // Check if this is text/plain
+        let content_type = get_header(&part_headers, "content-type")
+            .unwrap_or("")
+            .to_lowercase();
+
+        if content_type.is_empty() || content_type.contains("text/plain") {
+            // Found text/plain part - decode it
+            return Some(decode_part(&part_content, &part_headers));
+        }
+
+        // Check for nested multipart/alternative
+        if content_type.contains("multipart/alternative")
+            && let Some(nested_boundary) = extract_boundary(&part_headers)
+            && let Some(text) = extract_text_plain_from_multipart(&part_content, &nested_boundary)
+        {
+            return Some(text);
+        }
+    }
+
+    None
 }
 
 /// Event received from IDLE monitoring.
@@ -724,4 +803,509 @@ pub async fn idle_monitor(
         ImapIdleEvent::Recent(_) => IdleEvent::NewMail(0),
         ImapIdleEvent::Timeout => IdleEvent::Timeout,
     })
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::redundant_clone,
+    clippy::manual_string_new,
+    clippy::needless_collect,
+    clippy::unreadable_literal,
+    clippy::used_underscore_items,
+    clippy::similar_names
+)]
+mod tests {
+    use super::*;
+
+    // ===== FolderType::from_name tests =====
+
+    mod folder_type {
+        use super::*;
+
+        #[test]
+        fn test_inbox() {
+            assert_eq!(FolderType::from_name("INBOX"), FolderType::Inbox);
+            assert_eq!(FolderType::from_name("inbox"), FolderType::Inbox);
+            assert_eq!(FolderType::from_name("Inbox"), FolderType::Inbox);
+        }
+
+        #[test]
+        fn test_sent() {
+            assert_eq!(FolderType::from_name("Sent"), FolderType::Sent);
+            assert_eq!(FolderType::from_name("Sent Mail"), FolderType::Sent);
+            assert_eq!(FolderType::from_name("Sent Items"), FolderType::Sent);
+            assert_eq!(FolderType::from_name("[Gmail]/Sent Mail"), FolderType::Sent);
+        }
+
+        #[test]
+        fn test_drafts() {
+            assert_eq!(FolderType::from_name("Drafts"), FolderType::Drafts);
+            assert_eq!(FolderType::from_name("Draft"), FolderType::Drafts);
+            assert_eq!(FolderType::from_name("[Gmail]/Drafts"), FolderType::Drafts);
+        }
+
+        #[test]
+        fn test_trash() {
+            assert_eq!(FolderType::from_name("Trash"), FolderType::Trash);
+            assert_eq!(FolderType::from_name("Deleted Items"), FolderType::Trash);
+            assert_eq!(FolderType::from_name("[Gmail]/Trash"), FolderType::Trash);
+        }
+
+        #[test]
+        fn test_spam() {
+            assert_eq!(FolderType::from_name("Spam"), FolderType::Spam);
+            assert_eq!(FolderType::from_name("Junk"), FolderType::Spam);
+            assert_eq!(FolderType::from_name("Junk E-mail"), FolderType::Spam);
+            assert_eq!(FolderType::from_name("[Gmail]/Spam"), FolderType::Spam);
+        }
+
+        #[test]
+        fn test_archive() {
+            assert_eq!(FolderType::from_name("Archive"), FolderType::Archive);
+            assert_eq!(FolderType::from_name("All Mail"), FolderType::Regular);
+            assert_eq!(
+                FolderType::from_name("[Gmail]/All Mail"),
+                FolderType::Regular
+            );
+        }
+
+        #[test]
+        fn test_regular() {
+            assert_eq!(FolderType::from_name("Work"), FolderType::Regular);
+            assert_eq!(FolderType::from_name("Personal"), FolderType::Regular);
+            assert_eq!(FolderType::from_name("Projects/2024"), FolderType::Regular);
+        }
+    }
+
+    // ===== format_address tests =====
+
+    mod format_address_tests {
+        use super::*;
+
+        /// Helper to create an Address for testing.
+        fn make_address(name: Option<&str>, mailbox: Option<&str>, host: Option<&str>) -> Address {
+            Address {
+                name: name.map(ToString::to_string),
+                adl: None,
+                mailbox: mailbox.map(ToString::to_string),
+                host: host.map(ToString::to_string),
+            }
+        }
+
+        #[test]
+        fn test_with_name() {
+            let addr = make_address(Some("John Doe"), Some("john"), Some("example.com"));
+            assert_eq!(format_address(&addr), "John Doe");
+        }
+
+        #[test]
+        fn test_without_name_full_email() {
+            let addr = make_address(None, Some("jane"), Some("example.org"));
+            assert_eq!(format_address(&addr), "jane@example.org");
+        }
+
+        #[test]
+        fn test_empty_name_uses_email() {
+            let addr = make_address(Some(""), Some("user"), Some("domain.com"));
+            assert_eq!(format_address(&addr), "user@domain.com");
+        }
+
+        #[test]
+        fn test_mailbox_only() {
+            let addr = make_address(None, Some("local"), None);
+            assert_eq!(format_address(&addr), "local");
+        }
+
+        #[test]
+        fn test_empty_address() {
+            let addr = make_address(None, None, None);
+            assert_eq!(format_address(&addr), "");
+        }
+    }
+
+    // ===== truncate_text tests =====
+
+    mod truncate_text_tests {
+        use super::*;
+
+        #[test]
+        fn test_short_text() {
+            assert_eq!(truncate_text("Hello", 10), "Hello");
+        }
+
+        #[test]
+        fn test_exact_length() {
+            assert_eq!(truncate_text("1234567890", 10), "1234567890");
+        }
+
+        #[test]
+        fn test_long_text() {
+            assert_eq!(truncate_text("Hello, World!", 5), "Hello...");
+        }
+
+        #[test]
+        fn test_empty_text() {
+            assert_eq!(truncate_text("", 10), "");
+        }
+
+        #[test]
+        fn test_removes_control_chars() {
+            assert_eq!(truncate_text("Hello\x00World", 20), "HelloWorld");
+        }
+
+        #[test]
+        fn test_newlines_removed() {
+            assert_eq!(truncate_text("Line1\nLine2", 20), "Line1Line2");
+        }
+    }
+
+    // ===== split_headers_body tests =====
+
+    mod split_headers_body_tests {
+        use super::*;
+
+        #[test]
+        fn test_crlf_separator() {
+            let message = "From: test@example.com\r\nSubject: Test\r\n\r\nBody text";
+            let (headers, body) = split_headers_body(message);
+            assert_eq!(headers, "From: test@example.com\r\nSubject: Test");
+            assert_eq!(body, "Body text");
+        }
+
+        #[test]
+        fn test_lf_separator() {
+            let message = "From: test@example.com\nSubject: Test\n\nBody text";
+            let (headers, body) = split_headers_body(message);
+            assert_eq!(headers, "From: test@example.com\nSubject: Test");
+            assert_eq!(body, "Body text");
+        }
+
+        #[test]
+        fn test_headers_only() {
+            let message = "From: test@example.com\r\nSubject: Test";
+            let (headers, body) = split_headers_body(message);
+            assert_eq!(headers, message);
+            assert_eq!(body, "");
+        }
+
+        #[test]
+        fn test_empty_body() {
+            let message = "Subject: Empty\r\n\r\n";
+            let (headers, body) = split_headers_body(message);
+            assert_eq!(headers, "Subject: Empty");
+            assert_eq!(body, "");
+        }
+    }
+
+    // ===== get_header tests =====
+
+    mod get_header_tests {
+        use super::*;
+
+        #[test]
+        fn test_find_header() {
+            let headers = "From: sender@example.com\r\nTo: receiver@example.com\r\nSubject: Test";
+            assert_eq!(get_header(headers, "From"), Some("sender@example.com"));
+            assert_eq!(get_header(headers, "To"), Some("receiver@example.com"));
+            assert_eq!(get_header(headers, "Subject"), Some("Test"));
+        }
+
+        #[test]
+        fn test_case_insensitive() {
+            let headers = "Content-Type: text/plain";
+            assert_eq!(get_header(headers, "content-type"), Some("text/plain"));
+            assert_eq!(get_header(headers, "CONTENT-TYPE"), Some("text/plain"));
+            assert_eq!(get_header(headers, "Content-Type"), Some("text/plain"));
+        }
+
+        #[test]
+        fn test_missing_header() {
+            let headers = "From: test@example.com";
+            assert_eq!(get_header(headers, "Subject"), None);
+        }
+
+        #[test]
+        fn test_value_trimmed() {
+            let headers = "Subject:   Test Subject   ";
+            assert_eq!(get_header(headers, "Subject"), Some("Test Subject"));
+        }
+
+        #[test]
+        fn test_empty_headers() {
+            assert_eq!(get_header("", "Subject"), None);
+        }
+    }
+
+    // ===== extract_boundary tests =====
+
+    mod extract_boundary_tests {
+        use super::*;
+
+        #[test]
+        fn test_quoted_boundary() {
+            let headers = "Content-Type: multipart/mixed; boundary=\"----=_Part_123\"";
+            assert_eq!(
+                extract_boundary(headers),
+                Some("----=_Part_123".to_string())
+            );
+        }
+
+        #[test]
+        fn test_unquoted_boundary() {
+            let headers = "Content-Type: multipart/alternative; boundary=simple_boundary";
+            assert_eq!(
+                extract_boundary(headers),
+                Some("simple_boundary".to_string())
+            );
+        }
+
+        #[test]
+        fn test_boundary_with_semicolon_after() {
+            let headers = "Content-Type: multipart/mixed; boundary=boundary123; charset=utf-8";
+            assert_eq!(extract_boundary(headers), Some("boundary123".to_string()));
+        }
+
+        #[test]
+        fn test_no_boundary() {
+            let headers = "Content-Type: text/plain; charset=utf-8";
+            assert_eq!(extract_boundary(headers), None);
+        }
+
+        #[test]
+        fn test_no_content_type() {
+            let headers = "Subject: Test";
+            assert_eq!(extract_boundary(headers), None);
+        }
+    }
+
+    // ===== split_multipart tests =====
+
+    mod split_multipart_tests {
+        use super::*;
+
+        #[test]
+        fn test_two_parts() {
+            let body = "--boundary\r\nPart 1\r\n--boundary\r\nPart 2\r\n--boundary--";
+            let parts = split_multipart(body, "boundary");
+            assert_eq!(parts.len(), 2);
+            assert!(parts[0].contains("Part 1"));
+            assert!(parts[1].contains("Part 2"));
+        }
+
+        #[test]
+        fn test_single_part() {
+            let body = "--boundary\r\nOnly part\r\n--boundary--";
+            let parts = split_multipart(body, "boundary");
+            assert_eq!(parts.len(), 1);
+            assert!(parts[0].contains("Only part"));
+        }
+
+        #[test]
+        fn test_empty_body() {
+            let body = "--boundary\r\n--boundary--";
+            let parts = split_multipart(body, "boundary");
+            assert!(parts.is_empty());
+        }
+
+        #[test]
+        fn test_complex_boundary() {
+            let body = "--=_Part_123\r\nContent\r\n--=_Part_123--";
+            let parts = split_multipart(body, "=_Part_123");
+            assert_eq!(parts.len(), 1);
+        }
+    }
+
+    // ===== decode_part tests =====
+
+    mod decode_part_tests {
+        use super::*;
+
+        #[test]
+        fn test_7bit_passthrough() {
+            let body = "Hello, World!";
+            let headers = "Content-Transfer-Encoding: 7bit";
+            assert_eq!(decode_part(body, headers), "Hello, World!");
+        }
+
+        #[test]
+        fn test_8bit_passthrough() {
+            let body = "Hello, Wörld!";
+            let headers = "Content-Transfer-Encoding: 8bit";
+            assert_eq!(decode_part(body, headers), "Hello, Wörld!");
+        }
+
+        #[test]
+        fn test_no_encoding_header() {
+            let body = "Plain text";
+            let headers = "Content-Type: text/plain";
+            assert_eq!(decode_part(body, headers), "Plain text");
+        }
+
+        #[test]
+        fn test_base64_decode() {
+            let body = "SGVsbG8sIFdvcmxkIQ==";
+            let headers = "Content-Transfer-Encoding: base64";
+            assert_eq!(decode_part(body, headers), "Hello, World!");
+        }
+
+        #[test]
+        fn test_base64_with_whitespace() {
+            let body = "SGVs\r\nbG8s\r\nIFdvcmxkIQ==";
+            let headers = "Content-Transfer-Encoding: base64";
+            assert_eq!(decode_part(body, headers), "Hello, World!");
+        }
+
+        #[test]
+        fn test_quoted_printable() {
+            let body = "Hello=20World";
+            let headers = "Content-Transfer-Encoding: quoted-printable";
+            assert_eq!(decode_part(body, headers), "Hello World");
+        }
+    }
+
+    // ===== parse_message_body tests =====
+
+    mod parse_message_body_tests {
+        use super::*;
+
+        #[test]
+        fn test_plain_text_only() {
+            let raw = b"Content-Type: text/plain\r\n\r\nHello, World!";
+            let (text, html) = parse_message_body(raw);
+            assert_eq!(text, Some("Hello, World!".to_string()));
+            assert_eq!(html, None);
+        }
+
+        #[test]
+        fn test_html_only() {
+            let raw = b"Content-Type: text/html\r\n\r\n<p>Hello</p>";
+            let (text, html) = parse_message_body(raw);
+            assert_eq!(text, None);
+            assert_eq!(html, Some("<p>Hello</p>".to_string()));
+        }
+
+        #[test]
+        fn test_no_content_type_defaults_to_text() {
+            let raw = b"Subject: Test\r\n\r\nPlain body";
+            let (text, html) = parse_message_body(raw);
+            assert_eq!(text, Some("Plain body".to_string()));
+            assert_eq!(html, None);
+        }
+
+        #[test]
+        fn test_multipart_alternative() {
+            let raw = concat!(
+                "Content-Type: multipart/alternative; boundary=\"boundary\"\r\n",
+                "\r\n",
+                "--boundary\r\n",
+                "Content-Type: text/plain\r\n",
+                "\r\n",
+                "Plain text version\r\n",
+                "--boundary\r\n",
+                "Content-Type: text/html\r\n",
+                "\r\n",
+                "<p>HTML version</p>\r\n",
+                "--boundary--"
+            );
+            let (text, html) = parse_message_body(raw.as_bytes());
+            assert_eq!(text, Some("Plain text version".to_string()));
+            assert_eq!(html, Some("<p>HTML version</p>".to_string()));
+        }
+
+        #[test]
+        fn test_multipart_with_base64() {
+            let raw = concat!(
+                "Content-Type: multipart/mixed; boundary=\"bound\"\r\n",
+                "\r\n",
+                "--bound\r\n",
+                "Content-Type: text/plain\r\n",
+                "Content-Transfer-Encoding: base64\r\n",
+                "\r\n",
+                "SGVsbG8=\r\n",
+                "--bound--"
+            );
+            let (text, html) = parse_message_body(raw.as_bytes());
+            assert_eq!(text, Some("Hello".to_string()));
+            assert_eq!(html, None);
+        }
+
+        #[test]
+        fn test_empty_body() {
+            let raw = b"Subject: Empty\r\n\r\n";
+            let (text, html) = parse_message_body(raw);
+            assert_eq!(text, Some(String::new()));
+            assert_eq!(html, None);
+        }
+    }
+
+    // ===== extract_text_snippet tests =====
+
+    mod extract_text_snippet_tests {
+        use super::*;
+
+        #[test]
+        fn test_plain_text_body() {
+            let raw = b"Hello, this is a simple message.";
+            assert_eq!(
+                extract_text_snippet(raw),
+                "Hello, this is a simple message."
+            );
+        }
+
+        #[test]
+        fn test_multipart_extracts_text_plain() {
+            // This simulates what BODY[TEXT] returns for a multipart message
+            let raw = concat!(
+                "--000000000000abc123\r\n",
+                "Content-Type: text/plain; charset=\"UTF-8\"\r\n",
+                "\r\n",
+                "This is the plain text content.\r\n",
+                "--000000000000abc123\r\n",
+                "Content-Type: text/html; charset=\"UTF-8\"\r\n",
+                "\r\n",
+                "<p>This is HTML</p>\r\n",
+                "--000000000000abc123--"
+            );
+            let result = extract_text_snippet(raw.as_bytes());
+            assert!(result.contains("This is the plain text content"));
+            assert!(!result.contains("--000000000000abc123"));
+            assert!(!result.contains("<p>"));
+        }
+
+        #[test]
+        fn test_multipart_with_nested_alternative() {
+            let raw = concat!(
+                "--outer\r\n",
+                "Content-Type: multipart/alternative; boundary=\"inner\"\r\n",
+                "\r\n",
+                "--inner\r\n",
+                "Content-Type: text/plain\r\n",
+                "\r\n",
+                "Nested plain text\r\n",
+                "--inner\r\n",
+                "Content-Type: text/html\r\n",
+                "\r\n",
+                "<p>Nested HTML</p>\r\n",
+                "--inner--\r\n",
+                "--outer--"
+            );
+            let result = extract_text_snippet(raw.as_bytes());
+            assert!(result.contains("Nested plain text"));
+        }
+
+        #[test]
+        fn test_multipart_base64_encoded() {
+            let raw = concat!(
+                "--boundary\r\n",
+                "Content-Type: text/plain; charset=\"UTF-8\"\r\n",
+                "Content-Transfer-Encoding: base64\r\n",
+                "\r\n",
+                "SGVsbG8gV29ybGQ=\r\n", // "Hello World" in base64
+                "--boundary--"
+            );
+            let result = extract_text_snippet(raw.as_bytes());
+            assert_eq!(result, "Hello World");
+        }
+    }
 }

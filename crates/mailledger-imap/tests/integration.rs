@@ -3,6 +3,13 @@
 //! These tests use a mock stream to simulate IMAP server responses
 //! without requiring a real server connection.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::used_underscore_items,
+    clippy::cast_possible_truncation,
+    clippy::no_effect_underscore_binding
+)]
+
 use std::io::{self, Cursor};
 use std::pin::Pin;
 use std::task::{Context, Poll};

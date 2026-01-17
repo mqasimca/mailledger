@@ -177,6 +177,7 @@ pub fn decode_rfc2047(text: &str) -> Result<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::redundant_clone, clippy::manual_string_new, clippy::needless_collect, clippy::unreadable_literal, clippy::used_underscore_items, clippy::similar_names)]
 mod tests {
     use super::*;
 

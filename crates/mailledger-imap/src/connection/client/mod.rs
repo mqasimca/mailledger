@@ -106,6 +106,14 @@ where
         self.has_capability(&Capability::LoginDisabled)
     }
 
+    /// Returns true if the server supports AUTH=PLAIN (SASL PLAIN mechanism).
+    #[must_use]
+    pub fn supports_auth_plain(&self) -> bool {
+        self.capabilities
+            .iter()
+            .any(|c| matches!(c, Capability::Auth(m) if m.eq_ignore_ascii_case("PLAIN")))
+    }
+
     /// Sends a NOOP command to keep the connection alive.
     pub async fn noop(&mut self) -> Result<()> {
         let tag = self.tag_gen.next();

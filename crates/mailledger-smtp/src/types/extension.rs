@@ -102,6 +102,7 @@ impl AuthMechanism {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::redundant_clone, clippy::manual_string_new, clippy::needless_collect, clippy::unreadable_literal, clippy::used_underscore_items, clippy::similar_names)]
 mod tests {
     use super::*;
 
@@ -145,7 +146,7 @@ mod tests {
         fn parse_size_with_value() {
             let ext = Extension::parse("SIZE 52428800");
             if let Extension::Size(size) = ext {
-                assert_eq!(size, Some(52428800));
+                assert_eq!(size, Some(52_428_800));
             } else {
                 panic!("Expected Size variant");
             }

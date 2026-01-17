@@ -1,3 +1,10 @@
+#![allow(
+    clippy::expect_used,
+    clippy::doc_markdown,
+    clippy::uninlined_format_args,
+    clippy::used_underscore_items,
+    clippy::too_many_lines
+)]
 //! Example: OAuth2 Device Flow authentication with Outlook
 //!
 //! This example demonstrates the easiest way to authenticate with Outlook:

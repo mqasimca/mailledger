@@ -12,7 +12,7 @@ use crate::parser::{Response, ResponseParser, UntaggedResponse};
 use crate::types::ResponseCode;
 use crate::{Error, Result};
 use mailledger_oauth::Token;
-use mailledger_oauth::sasl::{oauthbearer_response, xoauth2_response};
+use mailledger_oauth::sasl::{oauthbearer_response, plain_response, xoauth2_response};
 
 impl<S> Client<S, NotAuthenticated>
 where
@@ -74,6 +74,52 @@ where
 
         self.stream.write_command(&cmd).await?;
 
+        let responses = self.read_until_tagged(&tag).await?;
+
+        // Update capabilities if included in response
+        for response_bytes in &responses {
+            if let Ok(Response::Untagged(UntaggedResponse::Capability(caps))) =
+                ResponseParser::parse(response_bytes)
+            {
+                self.capabilities = caps;
+            }
+        }
+
+        Self::check_tagged_ok(&responses, &tag)?;
+
+        Ok(Client {
+            stream: self.stream,
+            tag_gen: self.tag_gen,
+            capabilities: self.capabilities,
+            _state: PhantomData,
+        })
+    }
+
+    /// Authenticates with the server using SASL PLAIN mechanism (RFC 4616).
+    ///
+    /// Consumes self and returns an authenticated client on success.
+    /// This sends credentials as base64-encoded `\0username\0password`.
+    ///
+    /// Use this method when the server advertises `AUTH=PLAIN` capability
+    /// and may not support the legacy LOGIN command.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if authentication fails.
+    pub async fn authenticate_plain(
+        mut self,
+        username: &str,
+        password: &str,
+    ) -> Result<Client<S, Authenticated>> {
+        let auth_string = plain_response(username, password);
+        let tag = self.tag_gen.next();
+        let cmd = Command::Authenticate {
+            mechanism: "PLAIN".to_string(),
+            initial_response: Some(auth_string),
+        }
+        .serialize(&tag);
+
+        self.stream.write_command(&cmd).await?;
         let responses = self.read_until_tagged(&tag).await?;
 
         // Update capabilities if included in response

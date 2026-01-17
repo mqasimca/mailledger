@@ -5,6 +5,8 @@ use std::collections::HashMap;
 /// State for the account setup form.
 #[derive(Debug, Clone, Default)]
 pub struct AccountSetupState {
+    /// Existing account ID (None for new accounts).
+    pub account_id: Option<mailledger_core::AccountId>,
     /// Account name.
     pub name: String,
     /// Email address.
@@ -39,6 +41,8 @@ pub struct AccountSetupState {
     pub is_testing: bool,
     /// Connection test result.
     pub test_result: Option<Result<(), String>>,
+    /// Whether this account is the default.
+    pub is_default: bool,
 }
 
 impl AccountSetupState {
@@ -46,12 +50,42 @@ impl AccountSetupState {
     #[must_use]
     pub fn new() -> Self {
         Self {
+            account_id: None,
             imap_port: "993".to_string(),
             imap_security: "tls".to_string(),
             smtp_port: "465".to_string(),
             smtp_security: "tls".to_string(),
+            is_default: true,
             ..Default::default()
         }
+    }
+
+    /// Populate state from an existing account.
+    pub fn load_from_account(&mut self, account: &mailledger_core::Account) {
+        self.account_id = account.id;
+        self.name.clone_from(&account.name);
+        self.email.clone_from(&account.email);
+        self.imap_host.clone_from(&account.imap.host);
+        self.imap_port = account.imap.port.to_string();
+        self.imap_security = match account.imap.security {
+            mailledger_core::Security::StartTls => "starttls",
+            mailledger_core::Security::None => "none",
+            mailledger_core::Security::Tls => "tls",
+        }
+        .to_string();
+        self.imap_username.clone_from(&account.imap.username);
+        self.imap_password.clone_from(&account.imap.password);
+        self.smtp_host.clone_from(&account.smtp.host);
+        self.smtp_port = account.smtp.port.to_string();
+        self.smtp_security = match account.smtp.security {
+            mailledger_core::Security::StartTls => "starttls",
+            mailledger_core::Security::None => "none",
+            mailledger_core::Security::Tls => "tls",
+        }
+        .to_string();
+        self.smtp_username.clone_from(&account.smtp.username);
+        self.smtp_password.clone_from(&account.smtp.password);
+        self.is_default = account.is_default;
     }
 
     /// Auto-detect settings from email address.
@@ -181,7 +215,7 @@ impl AccountSetupState {
         };
 
         mailledger_core::Account {
-            id: None,
+            id: self.account_id,
             name: self.name.clone(),
             email: self.email.clone(),
             imap: ImapConfig {
@@ -198,7 +232,7 @@ impl AccountSetupState {
                 username: self.smtp_username.clone(),
                 password: self.smtp_password.clone(),
             },
-            is_default: true, // First account is default
+            is_default: self.is_default,
         }
     }
 }

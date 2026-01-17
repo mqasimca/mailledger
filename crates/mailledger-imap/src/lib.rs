@@ -100,8 +100,14 @@
 pub mod command;
 pub mod connection;
 mod error;
+pub mod fetch;
+pub mod handler;
 pub mod parser;
+pub mod pipeline;
+pub mod protocol;
+pub mod qresync;
 pub mod quirks;
+pub mod time;
 pub mod types;
 
 pub use command::{Command, FetchAttribute, FetchItems, SearchCriteria, StoreAction, TagGenerator};
@@ -110,8 +116,20 @@ pub use connection::{
     NotAuthenticated, ResponseAccumulator, Security, Selected,
 };
 pub use error::{Error, Result};
+pub use fetch::{
+    BatchConfig, BatchOrder, BatchedFetch, FetchAccumulator, FetchProgress, FetchResult,
+};
+pub use handler::{
+    CollectingHandler, LoggingHandler, NoopHandler, ResponseHandler, UnsolicitedEvent,
+};
 pub use parser::{Response, ResponseParser, UntaggedResponse};
+pub use pipeline::{Pipeline, PipelineConfig, PipelineSafety, QueuedCommand, batch_commands};
+pub use protocol::{CommandHandle, CommandResult, Protocol, ProtocolEvent, ProtocolState};
+pub use qresync::{
+    ChangedMessage, ModSeq, QresyncParams, SyncChanges, SyncState, VanishedResponse,
+};
 pub use quirks::{ServerQuirks, ServerType};
+pub use time::{BoxClock, Clock, MockClock, SystemClock};
 pub use types::{
     Capability, Flag, Flags, ListResponse, Mailbox, MailboxAttribute, MailboxStatus, ResponseCode,
     SeqNum, SequenceSet, Status, Tag, Uid, UidSet, UidValidity,

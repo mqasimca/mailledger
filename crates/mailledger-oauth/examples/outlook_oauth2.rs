@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used, clippy::doc_markdown, clippy::uninlined_format_args)]
 //! Example: OAuth2 authentication with Microsoft Outlook IMAP
 //!
 //! This example demonstrates how to:

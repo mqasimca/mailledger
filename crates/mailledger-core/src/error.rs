@@ -28,6 +28,10 @@ pub enum Error {
     /// Configuration error.
     #[error("Configuration error: {0}")]
     Config(String),
+
+    /// Credential storage error.
+    #[error("Credential error: {0}")]
+    Credential(#[from] crate::account::credentials::CredentialError),
 }
 
 /// Result type alias using our Error type.

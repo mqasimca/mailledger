@@ -26,6 +26,10 @@ tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 dirs = { workspace = true }
+reqwest = { workspace = true }
+rustls = { workspace = true }
+opener = { workspace = true }
+chrono = { workspace = true }
 
 [lints]
 workspace = true

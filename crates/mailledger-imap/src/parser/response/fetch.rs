@@ -48,14 +48,10 @@ pub fn parse_fetch_response(lexer: &mut Lexer<'_>) -> Result<Vec<FetchItem>> {
                         let envelope = parse_envelope(lexer)?;
                         items.push(FetchItem::Envelope(Box::new(envelope)));
                     }
-                    "BODY" | "BODY[]" => {
-                        // Simple body fetch
-                        let section = if let Some(start) = name.find('[') {
-                            let end = name.find(']').unwrap_or(name.len());
-                            Some(name[start + 1..end].to_string())
-                        } else {
-                            None
-                        };
+                    "BODY" | "BODYSTRUCTURE" | "RFC822" | "RFC822.HEADER" | "RFC822.TEXT" => {
+                        // Parse BODY[section]<origin> or BODY.PEEK[section]<origin> format
+                        // The lexer tokenizes [ ] < > separately, so we need to consume them
+                        let (section, origin) = parse_body_section_and_origin(lexer)?;
 
                         lexer.expect_space()?;
                         let data = match lexer.next_token()? {
@@ -66,7 +62,7 @@ pub fn parse_fetch_response(lexer: &mut Lexer<'_>) -> Result<Vec<FetchItem>> {
 
                         items.push(FetchItem::Body {
                             section,
-                            origin: None,
+                            origin,
                             data,
                         });
                     }
@@ -88,6 +84,68 @@ pub fn parse_fetch_response(lexer: &mut Lexer<'_>) -> Result<Vec<FetchItem>> {
     }
 
     Ok(items)
+}
+
+/// Parses optional [section] and <origin> from a BODY fetch response.
+///
+/// In IMAP FETCH responses, BODY can be followed by:
+/// - [section] like [TEXT], [HEADER], [1], [1.MIME], etc.
+/// - <origin> like <0> for partial fetches
+fn parse_body_section_and_origin(lexer: &mut Lexer<'_>) -> Result<(Option<String>, Option<u32>)> {
+    let mut section = None;
+    let mut origin = None;
+
+    // Check for [section]
+    if lexer.peek() == Some(b'[') {
+        lexer.advance(); // consume '['
+
+        // Read section content until ]
+        let mut section_buf = String::new();
+        loop {
+            match lexer.peek() {
+                Some(b']') => {
+                    lexer.advance();
+                    break;
+                }
+                Some(b) => {
+                    section_buf.push(b as char);
+                    lexer.advance();
+                }
+                None => break,
+            }
+        }
+
+        if !section_buf.is_empty() {
+            section = Some(section_buf);
+        }
+    }
+
+    // Check for <origin>
+    if lexer.peek() == Some(b'<') {
+        lexer.advance(); // consume '<'
+
+        // Read origin number until >
+        let mut origin_buf = String::new();
+        loop {
+            match lexer.peek() {
+                Some(b'>') => {
+                    lexer.advance();
+                    break;
+                }
+                Some(b) if b.is_ascii_digit() => {
+                    origin_buf.push(b as char);
+                    lexer.advance();
+                }
+                _ => break,
+            }
+        }
+
+        if !origin_buf.is_empty() {
+            origin = origin_buf.parse().ok();
+        }
+    }
+
+    Ok((section, origin))
 }
 
 /// Parses an envelope structure.

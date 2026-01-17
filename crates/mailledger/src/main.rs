@@ -12,23 +12,32 @@ mod style;
 mod view;
 
 use iced::keyboard::{self, Key, Modifiers};
-use iced::widget::{column, row};
-use iced::{Element, Length, Subscription, Task};
+use iced::widget::{Space, column, container, image, row, text};
+use iced::{Background, Border, Element, Length, Subscription, Task};
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use message::{
     AccountSetupMessage, ComposeMessage, KeyboardAction, Message, SettingsMessage, View,
 };
 use model::{
-    AccountSetupState, AppSettings, ComposeState, Folder, FolderId, FolderType, MessageContent,
-    MessageId, MessageSummary, SettingsState,
+    AccountSetupState, AppSettings, ComposeState, Folder, FolderId, FolderType, InlineImage,
+    InlineImageState, MessageContent, MessageId, MessageSummary, SettingsState,
 };
-use style::widgets::palette::ThemeMode;
+use style::widgets::palette::{self, ThemeMode};
+use style::widgets::radius;
 
 fn main() -> iced::Result {
+    if rustls::crypto::ring::default_provider()
+        .install_default()
+        .is_err()
+    {
+        eprintln!("Failed to install rustls crypto provider");
+        std::process::exit(1);
+    }
+
     // Initialize logging
     tracing_subscriber::registry()
         .with(
@@ -65,6 +74,8 @@ struct MailLedger {
     selected_message: Option<MessageId>,
     /// Content of the selected message.
     message_content: Option<MessageContent>,
+    /// Inline images extracted from message HTML.
+    inline_images: Vec<InlineImage>,
     /// Search query.
     search_query: String,
     /// Account setup state.
@@ -100,6 +111,7 @@ impl Default for MailLedger {
             all_messages: Vec::new(),
             selected_message: None,
             message_content: None,
+            inline_images: Vec::new(),
             search_query: String::new(),
             account_setup: AccountSetupState::new(),
             compose_state: ComposeState::new(),
@@ -163,7 +175,11 @@ impl MailLedger {
             Message::NavigateTo(view) => {
                 self.current_view = view;
                 if view == View::AccountSetup {
-                    self.account_setup = AccountSetupState::new();
+                    let mut setup = AccountSetupState::new();
+                    if let Some(account) = self.current_account.as_ref() {
+                        setup.load_from_account(account);
+                    }
+                    self.account_setup = setup;
                 }
             }
             Message::ToggleSidebar => {
@@ -194,6 +210,20 @@ impl MailLedger {
                     return Task::perform(load_folders(account), Message::FoldersLoaded);
                 }
             }
+            Message::RefreshMessages => {
+                // Reload messages from the current folder
+                if let Some(account) = self.current_account.clone()
+                    && let Some(folder_id) = self.selected_folder
+                    && let Some(folder) = self.folders.iter().find(|f| f.id == folder_id)
+                {
+                    let folder_path = folder.path.clone();
+                    self.is_loading_messages = true;
+                    return Task::perform(
+                        load_messages(account, folder_path, folder_id),
+                        Message::MessagesLoaded,
+                    );
+                }
+            }
             Message::SearchQueryChanged(query) => {
                 self.search_query = query;
                 // Filter messages locally for instant feedback
@@ -209,6 +239,7 @@ impl MailLedger {
             Message::SelectMessage(message_id) => {
                 self.selected_message = Some(message_id);
                 self.message_content = None; // Clear while loading
+                self.inline_images.clear();
 
                 // Fetch full message content from IMAP
                 if let Some(account) = self.current_account.clone()
@@ -221,30 +252,54 @@ impl MailLedger {
                     );
                 }
             }
-            Message::MessageContentLoaded(result) => match result {
-                Ok(Some(content)) => {
-                    self.message_content = Some(content);
-                }
-                Ok(None) => {
-                    // Message not found, show error or fallback
-                    if let Some(summary) = self
-                        .selected_message
-                        .and_then(|id| self.messages.iter().find(|m| m.id == id))
-                    {
-                        self.message_content = Some(MessageContent::mock_content(summary));
+            Message::MessageContentLoaded(result) => {
+                let mut html_body = None;
+                match result {
+                    Ok(Some(content)) => {
+                        html_body.clone_from(&content.body_html);
+                        self.message_content = Some(content);
+                    }
+                    Ok(None) => {
+                        // Message not found, show error or fallback
+                        if let Some(summary) = self
+                            .selected_message
+                            .and_then(|id| self.messages.iter().find(|m| m.id == id))
+                        {
+                            self.message_content = Some(MessageContent::mock_content(summary));
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to load message content: {}", e);
+                        // Fallback to mock content on error
+                        if let Some(summary) = self
+                            .selected_message
+                            .and_then(|id| self.messages.iter().find(|m| m.id == id))
+                        {
+                            self.message_content = Some(MessageContent::mock_content(summary));
+                        }
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to load message content: {}", e);
-                    // Fallback to mock content on error
-                    if let Some(summary) = self
-                        .selected_message
-                        .and_then(|id| self.messages.iter().find(|m| m.id == id))
-                    {
-                        self.message_content = Some(MessageContent::mock_content(summary));
+
+                self.inline_images.clear();
+                if let Some(html) = html_body {
+                    let urls = extract_image_urls(&html);
+                    let (inline_images, task) = prepare_inline_images(urls);
+                    self.inline_images = inline_images;
+                    return task;
+                }
+            }
+            Message::InlineImageLoaded { url, result } => {
+                if let Some(entry) = self.inline_images.iter_mut().find(|img| img.url == url) {
+                    match result {
+                        Ok(bytes) => {
+                            entry.state = InlineImageState::Ready(image::Handle::from_bytes(bytes));
+                        }
+                        Err(err) => {
+                            entry.state = InlineImageState::Failed(err);
+                        }
                     }
                 }
-            },
+            }
             Message::ToggleRead(message_id) => {
                 if let Some(msg) = self.messages.iter_mut().find(|m| m.id == message_id) {
                     msg.is_read = !msg.is_read;
@@ -272,6 +327,21 @@ impl MailLedger {
             Message::ComposeNew => {
                 self.compose_state = ComposeState::new();
                 self.current_view = View::Compose;
+            }
+            Message::OpenHtml => {
+                if let Some(content) = self.message_content.as_ref()
+                    && let Some(html) = content.body_html.as_ref()
+                {
+                    return Task::perform(
+                        open_html_message(html.clone(), content.id.0, content.subject.clone()),
+                        Message::HtmlOpened,
+                    );
+                }
+            }
+            Message::HtmlOpened(result) => {
+                if let Err(err) = result {
+                    self.error_message = Some(format!("Failed to open HTML: {err}"));
+                }
             }
             Message::Reply => {
                 if let Some(ref content) = self.message_content {
@@ -421,6 +491,7 @@ impl MailLedger {
                         }
                     }
                     Err(e) => {
+                        tracing::error!("Failed to load folders: {}", e);
                         self.error_message = Some(format!("Failed to load folders: {e}"));
                     }
                 }
@@ -720,6 +791,25 @@ impl MailLedger {
     /// Main inbox view with three-pane layout.
     fn view_inbox(&self) -> Element<'_, Message> {
         let header = view::view_header(&self.search_query);
+        let error_banner: Element<'_, Message> = self.error_message.as_ref().map_or_else(
+            || Space::new().height(0).into(),
+            |error| {
+                let p = palette::current();
+                container(text(error).size(14).color(p.text_on_primary))
+                    .padding([6, 12])
+                    .width(Length::Fill)
+                    .style(move |_theme| container::Style {
+                        background: Some(Background::Color(p.accent_red)),
+                        border: Border {
+                            color: p.accent_red,
+                            width: 1.0,
+                            radius: radius::SMALL.into(),
+                        },
+                        ..Default::default()
+                    })
+                    .into()
+            },
+        );
 
         let mut main_content = row![];
 
@@ -736,9 +826,12 @@ impl MailLedger {
         ));
 
         // Message content
-        main_content = main_content.push(view::view_message_content(self.message_content.as_ref()));
+        main_content = main_content.push(view::view_message_content(
+            self.message_content.as_ref(),
+            &self.inline_images,
+        ));
 
-        column![header, main_content.height(Length::Fill)]
+        column![header, error_banner, main_content.height(Length::Fill)]
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
@@ -822,6 +915,170 @@ fn handle_key_press(key: Key, modifiers: Modifiers) -> Option<Message> {
         }
         _ => None,
     }
+}
+
+fn prepare_inline_images(urls: Vec<String>) -> (Vec<InlineImage>, Task<Message>) {
+    let mut seen = HashSet::new();
+    let mut inline_images = Vec::new();
+    let mut tasks = Vec::new();
+
+    for url in urls {
+        if !seen.insert(url.clone()) {
+            continue;
+        }
+
+        if url.starts_with("http://") || url.starts_with("https://") {
+            inline_images.push(InlineImage {
+                url: url.clone(),
+                state: InlineImageState::Loading,
+            });
+
+            tasks.push(Task::perform(
+                download_inline_image(url.clone()),
+                move |result| Message::InlineImageLoaded { url, result },
+            ));
+        }
+
+        if inline_images.len() >= 10 {
+            break;
+        }
+    }
+
+    let task = if tasks.is_empty() {
+        Task::none()
+    } else {
+        Task::batch(tasks)
+    };
+
+    (inline_images, task)
+}
+
+fn extract_image_urls(html: &str) -> Vec<String> {
+    let lower = html.to_lowercase();
+    let mut urls = Vec::new();
+    let mut idx = 0;
+
+    while let Some(pos) = lower[idx..].find("<img") {
+        let start = idx + pos;
+        let end = lower[start..]
+            .find('>')
+            .map_or(html.len(), |offset| start + offset);
+
+        let tag = &html[start..end];
+        if let Some(src) = extract_html_attr(tag, "src")
+            && !src.is_empty()
+        {
+            urls.push(src);
+        }
+
+        idx = end.saturating_add(1);
+    }
+
+    urls
+}
+
+fn extract_html_attr(tag: &str, attr: &str) -> Option<String> {
+    let lower = tag.to_lowercase();
+    let mut idx = 0;
+
+    while let Some(pos) = lower[idx..].find(attr) {
+        let mut cursor = idx + pos + attr.len();
+
+        while cursor < tag.len() && tag.as_bytes()[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        if cursor >= tag.len() || tag.as_bytes()[cursor] != b'=' {
+            idx = cursor;
+            continue;
+        }
+
+        cursor += 1;
+        while cursor < tag.len() && tag.as_bytes()[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        if cursor >= tag.len() {
+            return None;
+        }
+
+        let quote = tag.as_bytes()[cursor];
+        if quote == b'"' || quote == b'\'' {
+            cursor += 1;
+            let start = cursor;
+            while cursor < tag.len() && tag.as_bytes()[cursor] != quote {
+                cursor += 1;
+            }
+            return Some(tag[start..cursor].to_string());
+        }
+
+        let start = cursor;
+        while cursor < tag.len()
+            && !tag.as_bytes()[cursor].is_ascii_whitespace()
+            && tag.as_bytes()[cursor] != b'>'
+        {
+            cursor += 1;
+        }
+        return Some(tag[start..cursor].to_string());
+    }
+
+    None
+}
+
+async fn download_inline_image(url: String) -> Result<Vec<u8>, String> {
+    let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    Ok(bytes.to_vec())
+}
+
+async fn open_html_message(
+    html_body: String,
+    message_id: u32,
+    subject: String,
+) -> Result<(), String> {
+    let dir = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("mailledger")
+        .join("html");
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let file_path = dir.join(format!("message_{message_id}.html"));
+    let document = format!(
+        "<!doctype html><meta charset=\"utf-8\"><title>{}</title>{}",
+        html_escape(&subject),
+        html_body
+    );
+
+    tokio::fs::write(&file_path, document)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    tokio::task::spawn_blocking(move || opener::open(file_path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+fn html_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(c),
+        }
+    }
+    escaped
 }
 
 /// Load application settings from file.
@@ -993,23 +1250,30 @@ async fn load_messages(
         .await
         .map_err(|e| e.to_string())?;
 
-    // Get the number of messages
+    // Get the number of messages and highest possible UID
     let total = status.exists;
     if total == 0 {
         return Ok(Vec::new());
     }
 
+    // Use UIDNEXT - 1 as the max UID (UIDs are not sequential with message count)
+    // If UIDNEXT is not available, use 1:* by setting a high upper bound
+    let max_uid = status
+        .uid_next
+        .map_or(u32::MAX, |u| u.get().saturating_sub(1));
+
     // Fetch the most recent messages (up to 50)
+    // We fetch from (max_uid - 49) to max_uid to get the latest messages
     let fetch_count = total.min(50);
-    let start_uid = if total > fetch_count {
-        total - fetch_count + 1
+    let start_uid = if max_uid > fetch_count {
+        max_uid - fetch_count + 1
     } else {
         1
     };
 
     let uid_set = UidSet::range(
         mailledger_imap::types::Uid::new(start_uid).ok_or("Invalid UID")?,
-        mailledger_imap::types::Uid::new(total).ok_or("Invalid UID")?,
+        mailledger_imap::types::Uid::new(max_uid).ok_or("Invalid UID")?,
     );
 
     let core_messages = fetch_messages(&mut selected_client, &uid_set)
