@@ -127,15 +127,20 @@ pub async fn connect_plain(host: &str, port: u16) -> Result<ImapStream> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::redundant_clone, clippy::manual_string_new, clippy::needless_collect, clippy::unreadable_literal, clippy::used_underscore_items, clippy::similar_names)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::redundant_clone,
+    clippy::manual_string_new,
+    clippy::needless_collect,
+    clippy::unreadable_literal,
+    clippy::used_underscore_items,
+    clippy::similar_names
+)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_create_tls_connector() {
-        // Install default crypto provider for tests
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
         let connector = create_tls_connector();
         assert!(connector.is_ok());
     }

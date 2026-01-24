@@ -1,6 +1,8 @@
 //! Shadow presets and rounded corner radii.
+//!
+//! Includes Air-style glow effects for primary buttons.
 
-use iced::{Shadow, Vector};
+use iced::{Color, Shadow, Vector};
 
 use super::palette;
 
@@ -47,5 +49,24 @@ pub const fn large() -> Shadow {
         color: palette::SHADOW_MEDIUM,
         offset: Vector::new(0.0, 8.0),
         blur_radius: 24.0,
+    }
+}
+
+/// Glow effect - colored shadow for Air-style buttons.
+/// Creates a subtle colored aura around elements.
+pub const fn glow(color: Color) -> Shadow {
+    Shadow {
+        color: Color::from_rgba(color.r, color.g, color.b, 0.3),
+        offset: Vector::new(0.0, 2.0),
+        blur_radius: 12.0,
+    }
+}
+
+/// Strong glow effect - for hover states.
+pub const fn glow_strong(color: Color) -> Shadow {
+    Shadow {
+        color: Color::from_rgba(color.r, color.g, color.b, 0.5),
+        offset: Vector::new(0.0, 4.0),
+        blur_radius: 20.0,
     }
 }

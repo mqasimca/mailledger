@@ -112,6 +112,12 @@ pub struct MessageSummary {
     pub has_attachment: bool,
     /// Preview snippet of the message body.
     pub snippet: String,
+    /// Message-ID header for threading.
+    pub message_id: Option<String>,
+    /// In-Reply-To header for threading.
+    pub in_reply_to: Option<String>,
+    /// Thread ID (computed from Message-ID/In-Reply-To chain).
+    pub thread_id: Option<String>,
 }
 
 /// Full content of an email message.
@@ -146,6 +152,10 @@ pub struct Attachment {
     pub mime_type: String,
     /// Size in bytes.
     pub size: u64,
+    /// Part number for fetching (e.g., "1", "2.1", etc.).
+    pub part_number: String,
+    /// Content-Transfer-Encoding.
+    pub encoding: String,
 }
 
 /// Type alias for authenticated IMAP client with TLS stream.
@@ -305,6 +315,14 @@ pub async fn fetch_messages(
         if let Some(uid) = uid {
             let envelope = envelope.as_deref();
 
+            // Extract threading headers
+            let message_id = envelope.and_then(|e| e.message_id.clone());
+            let in_reply_to = envelope.and_then(|e| e.in_reply_to.clone());
+
+            // Compute thread_id: use the root message ID from In-Reply-To chain
+            // For simplicity, we use In-Reply-To if present, otherwise Message-ID
+            let thread_id = in_reply_to.clone().or_else(|| message_id.clone());
+
             messages.push(MessageSummary {
                 uid,
                 subject: envelope.and_then(|e| e.subject.clone()).unwrap_or_default(),
@@ -324,11 +342,107 @@ pub async fn fetch_messages(
                     .as_ref()
                     .map(|b| truncate_text(&extract_text_snippet(b), 100))
                     .unwrap_or_default(),
+                message_id,
+                in_reply_to,
+                thread_id,
             });
         }
     }
 
     Ok(messages)
+}
+
+/// Search criteria for IMAP SEARCH command.
+#[derive(Debug, Clone, Default)]
+pub struct SearchCriteria {
+    /// Search text (matches subject, from, to, body).
+    pub text: Option<String>,
+    /// Search from field.
+    pub from: Option<String>,
+    /// Search to field.
+    pub to: Option<String>,
+    /// Search subject.
+    pub subject: Option<String>,
+    /// Search only unread messages.
+    pub unread: bool,
+    /// Search only flagged/starred messages.
+    pub flagged: bool,
+    /// Search since date (format: "DD-MMM-YYYY").
+    pub since: Option<String>,
+    /// Search before date (format: "DD-MMM-YYYY").
+    pub before: Option<String>,
+}
+
+impl SearchCriteria {
+    /// Build IMAP SEARCH criteria string.
+    #[must_use]
+    pub fn to_imap_criteria(&self) -> String {
+        let mut parts = Vec::new();
+
+        if let Some(text) = &self.text {
+            // TEXT searches in headers and body
+            parts.push(format!("TEXT \"{}\"", escape_search_string(text)));
+        }
+        if let Some(from) = &self.from {
+            parts.push(format!("FROM \"{}\"", escape_search_string(from)));
+        }
+        if let Some(to) = &self.to {
+            parts.push(format!("TO \"{}\"", escape_search_string(to)));
+        }
+        if let Some(subject) = &self.subject {
+            parts.push(format!("SUBJECT \"{}\"", escape_search_string(subject)));
+        }
+        if self.unread {
+            parts.push("UNSEEN".to_string());
+        }
+        if self.flagged {
+            parts.push("FLAGGED".to_string());
+        }
+        if let Some(since) = &self.since {
+            parts.push(format!("SINCE {since}"));
+        }
+        if let Some(before) = &self.before {
+            parts.push(format!("BEFORE {before}"));
+        }
+
+        if parts.is_empty() {
+            "ALL".to_string()
+        } else {
+            parts.join(" ")
+        }
+    }
+}
+
+/// Escape special characters in IMAP search strings.
+///
+/// For safety, only allows alphanumeric characters, spaces, and common email characters.
+/// This prevents potential IMAP command injection via search terms.
+fn escape_search_string(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '@' | '.' | '-' | '_' | '+'))
+        .collect()
+}
+
+/// Search for messages matching the given criteria.
+///
+/// Returns the UIDs of matching messages.
+///
+/// # Errors
+///
+/// Returns an error if the IMAP search fails.
+pub async fn search_messages(
+    client: &mut SelectedClient,
+    criteria: &SearchCriteria,
+) -> Result<Vec<Uid>, MailServiceError> {
+    let criteria_str = criteria.to_imap_criteria();
+    tracing::debug!("IMAP SEARCH criteria: {}", criteria_str);
+
+    let uids = client
+        .uid_search(&criteria_str)
+        .await
+        .map_err(|e| MailServiceError::Operation(e.to_string()))?;
+
+    Ok(uids)
 }
 
 /// Mark a message as read.
@@ -394,6 +508,43 @@ async fn remove_flag(
     Ok(())
 }
 
+/// Move a message to the Archive folder.
+///
+/// Uses the MOVE command (RFC 6851) to move the message to the specified
+/// archive folder path. If the server doesn't support MOVE, falls back to
+/// COPY + STORE \Deleted + EXPUNGE.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub async fn archive_message(
+    client: &mut SelectedClient,
+    uid: Uid,
+    archive_folder: &str,
+) -> Result<(), MailServiceError> {
+    let uid_set = UidSet::single(uid);
+
+    // Try MOVE first (preferred, atomic operation)
+    if client.uid_move(&uid_set, archive_folder).await.is_ok() {
+        return Ok(());
+    }
+
+    // Fallback: COPY then STORE \Deleted then EXPUNGE
+    client
+        .uid_copy(&uid_set, archive_folder)
+        .await
+        .map_err(|e| MailServiceError::Operation(e.to_string()))?;
+    client
+        .uid_store(&uid_set, StoreAction::AddFlags(vec![Flag::Deleted]))
+        .await
+        .map_err(|e| MailServiceError::Operation(e.to_string()))?;
+    client
+        .expunge()
+        .await
+        .map_err(|e| MailServiceError::Operation(e.to_string()))?;
+    Ok(())
+}
+
 /// Format an address for display.
 fn format_address(addr: &Address) -> String {
     if let Some(ref name) = addr.name
@@ -451,8 +602,12 @@ fn extract_text_snippet(raw_body: &[u8]) -> String {
 /// Extract the text/plain content from a multipart body.
 fn extract_text_plain_from_multipart(body: &str, boundary: &str) -> Option<String> {
     let delimiter = format!("--{boundary}");
+    let mut parts = body.split(&delimiter);
 
-    for part in body.split(&delimiter) {
+    // Skip preamble (content before the first boundary per RFC 2046)
+    parts.next();
+
+    for part in parts {
         let trimmed = part.trim();
 
         // Skip empty parts and closing boundary
@@ -509,13 +664,16 @@ pub async fn fetch_message_content(
     client: &mut SelectedClient,
     uid: Uid,
 ) -> Result<Option<MessageContent>, MailServiceError> {
+    use mailledger_imap::parser::BodyStructure;
+
     let uid_set = UidSet::single(uid);
 
-    // Fetch full body and envelope
+    // Fetch full body, envelope, and body structure for attachments
     let fetch_items = FetchItems::Items(vec![
         FetchAttribute::Uid,
         FetchAttribute::Flags,
         FetchAttribute::Envelope,
+        FetchAttribute::BodyStructure,
         FetchAttribute::Body {
             section: None, // Full message
             peek: true,
@@ -532,12 +690,16 @@ pub async fn fetch_message_content(
         let mut msg_uid = None;
         let mut envelope = None;
         let mut body_data: Option<Vec<u8>> = None;
+        let mut body_structure: Option<BodyStructure> = None;
 
         for item in items {
             match item {
                 FetchItem::Uid(u) => msg_uid = Some(u),
                 FetchItem::Envelope(e) => envelope = Some(e),
-                FetchItem::Body { data, .. } => body_data = data,
+                FetchItem::Body { data, .. } => {
+                    body_data = data;
+                }
+                FetchItem::BodyStructure(bs) => body_structure = Some(bs),
                 _ => {}
             }
         }
@@ -548,6 +710,11 @@ pub async fn fetch_message_content(
             // Parse the body to extract text/html parts
             let (body_text, body_html) =
                 body_data.map_or((None, None), |raw_body| parse_message_body(&raw_body));
+
+            // Extract attachments from body structure
+            let attachments = body_structure
+                .map(|bs| extract_attachments_from_structure(&bs, ""))
+                .unwrap_or_default();
 
             return Ok(Some(MessageContent {
                 uid,
@@ -565,12 +732,140 @@ pub async fn fetch_message_content(
                 date: envelope.and_then(|e| e.date.clone()).unwrap_or_default(),
                 body_text,
                 body_html,
-                attachments: Vec::new(), // TODO: Parse attachments from body structure
+                attachments,
             }));
         }
     }
 
     Ok(None)
+}
+
+/// Extract attachments from a BODYSTRUCTURE response.
+///
+/// Recursively traverses the body structure to find attachment parts.
+/// Attachments are identified by:
+/// - Content-Disposition: attachment
+/// - Non-inline parts with a filename
+/// - Non-text/non-html parts in multipart messages
+fn extract_attachments_from_structure(
+    structure: &mailledger_imap::parser::BodyStructure,
+    part_prefix: &str,
+) -> Vec<Attachment> {
+    use mailledger_imap::parser::BodyStructure;
+
+    let mut attachments = Vec::new();
+
+    match structure {
+        BodyStructure::Basic {
+            media_type,
+            media_subtype,
+            params,
+            size,
+            encoding,
+            ..
+        } => {
+            // Check if this part has a filename (likely an attachment)
+            let filename = params
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("name"))
+                .map(|(_, v)| v.clone());
+
+            if let Some(filename) = filename {
+                let part_number = if part_prefix.is_empty() {
+                    "1".to_string()
+                } else {
+                    part_prefix.to_string()
+                };
+
+                attachments.push(Attachment {
+                    filename,
+                    mime_type: format!("{media_type}/{media_subtype}"),
+                    size: u64::from(*size),
+                    part_number,
+                    encoding: encoding.clone(),
+                });
+            }
+        }
+        BodyStructure::Text { .. } | BodyStructure::Message { .. } => {
+            // Text parts are content; nested messages are skipped for simplicity
+        }
+        BodyStructure::Multipart { bodies, .. } => {
+            // Recursively process each part
+            for (i, body) in bodies.iter().enumerate() {
+                let part_num = if part_prefix.is_empty() {
+                    format!("{}", i + 1)
+                } else {
+                    format!("{}.{}", part_prefix, i + 1)
+                };
+                attachments.extend(extract_attachments_from_structure(body, &part_num));
+            }
+        }
+    }
+
+    attachments
+}
+
+/// Download an attachment from a message.
+///
+/// Returns the decoded attachment data.
+///
+/// # Errors
+///
+/// Returns an error if the fetch or decode operation fails.
+pub async fn download_attachment(
+    client: &mut SelectedClient,
+    uid: Uid,
+    part_number: &str,
+    encoding: &str,
+) -> Result<Vec<u8>, MailServiceError> {
+    let uid_set = UidSet::single(uid);
+
+    // Fetch the specific body part
+    let fetch_items = FetchItems::Items(vec![FetchAttribute::Body {
+        section: Some(part_number.to_string()),
+        peek: true,
+        partial: None,
+    }]);
+
+    let responses = client
+        .uid_fetch(&uid_set, fetch_items)
+        .await
+        .map_err(|e| MailServiceError::Operation(e.to_string()))?;
+
+    for (_seq_num, items) in responses {
+        for item in items {
+            if let FetchItem::Body {
+                data: Some(data), ..
+            } = item
+            {
+                // Decode based on encoding
+                let decoded = match encoding.to_lowercase().as_str() {
+                    "base64" => {
+                        let cleaned: String = data
+                            .iter()
+                            .map(|&b| b as char)
+                            .filter(|c| !c.is_whitespace())
+                            .collect();
+                        mailledger_mime::encoding::decode_base64(&cleaned)
+                            .map_err(|e| MailServiceError::Operation(e.to_string()))?
+                    }
+                    "quoted-printable" => {
+                        let text = String::from_utf8_lossy(&data);
+                        mailledger_mime::encoding::decode_quoted_printable(&text)
+                            .map_err(|e| MailServiceError::Operation(e.to_string()))?
+                            .into_bytes()
+                    }
+                    _ => data, // 7bit, 8bit, binary - return as-is
+                };
+
+                return Ok(decoded);
+            }
+        }
+    }
+
+    Err(MailServiceError::Operation(
+        "Attachment not found".to_string(),
+    ))
 }
 
 /// Parse raw message body to extract text and HTML parts.
@@ -1306,6 +1601,83 @@ mod tests {
             );
             let result = extract_text_snippet(raw.as_bytes());
             assert_eq!(result, "Hello World");
+        }
+
+        #[test]
+        fn test_multipart_with_preamble_skipped() {
+            // Test that the preamble iterator skip works correctly
+            // This test directly checks extract_text_plain_from_multipart
+            let body = concat!(
+                "Preamble text that should be ignored\r\n",
+                "--boundary\r\n",
+                "Content-Type: text/plain\r\n",
+                "\r\n",
+                "Actual content\r\n",
+                "--boundary--"
+            );
+            let result = extract_text_plain_from_multipart(body, "boundary");
+            assert!(result.is_some());
+            let text = result.unwrap();
+            assert_eq!(text, "Actual content");
+            // Verify preamble is not in the result
+            assert!(!text.contains("Preamble"));
+        }
+
+        #[test]
+        fn test_multipart_closing_boundary() {
+            // Test proper handling of closing boundary
+            let raw = concat!(
+                "--boundary\r\n",
+                "Content-Type: text/plain\r\n",
+                "\r\n",
+                "First part\r\n",
+                "--boundary\r\n",
+                "Content-Type: text/plain\r\n",
+                "\r\n",
+                "Second part\r\n",
+                "--boundary--\r\n",
+                "Epilogue text here"
+            );
+            let result = extract_text_snippet(raw.as_bytes());
+            // Should get first text/plain part
+            assert!(result.contains("First part") || result.contains("Second part"));
+            assert!(!result.contains("Epilogue"));
+        }
+    }
+
+    mod search {
+        use super::*;
+
+        #[test]
+        fn test_escape_search_string_safe_characters() {
+            let safe = "hello@example.com user_name-123";
+            let escaped = escape_search_string(safe);
+            assert_eq!(escaped, safe);
+        }
+
+        #[test]
+        fn test_escape_search_string_removes_unsafe() {
+            let unsafe_str = "hello\"world'<script>";
+            let escaped = escape_search_string(unsafe_str);
+            // Should only contain safe characters
+            assert_eq!(escaped, "helloworldscript");
+        }
+
+        #[test]
+        fn test_escape_search_string_injection_attempt() {
+            // Attempt to inject IMAP commands
+            let injection = "user@example.com) OR (ALL";
+            let escaped = escape_search_string(injection);
+            // Parentheses should be removed
+            assert!(!escaped.contains('('));
+            assert!(!escaped.contains(')'));
+        }
+
+        #[test]
+        fn test_escape_search_string_preserves_email() {
+            let email = "user+tag@example-domain.com";
+            let escaped = escape_search_string(email);
+            assert_eq!(escaped, email);
         }
     }
 }

@@ -7,7 +7,7 @@ use super::palette;
 use super::shadows;
 use super::shadows::radius;
 
-/// Primary button style - flat terminal style with minimal rounding.
+/// Primary button style - Air-style with glow effect.
 pub fn primary_button_style(_theme: &iced::Theme, status: button::Status) -> button::Style {
     let p = palette::current();
 
@@ -15,11 +15,11 @@ pub fn primary_button_style(_theme: &iced::Theme, status: button::Status) -> but
         background: Some(Background::Color(p.primary)),
         text_color: p.text_on_primary,
         border: Border {
-            color: p.primary,
-            width: 1.0,                    // Subtle border
-            radius: radius::MEDIUM.into(), // Minimal rounding
+            color: p.primary_light,
+            width: 1.0,
+            radius: radius::MEDIUM.into(),
         },
-        shadow: shadows::none(), // No shadows in terminal UI
+        shadow: shadows::glow(p.primary), // Glow effect
         snap: false,
     };
 
@@ -32,15 +32,18 @@ pub fn primary_button_style(_theme: &iced::Theme, status: button::Status) -> but
                 width: 1.0,
                 radius: radius::MEDIUM.into(),
             },
+            shadow: shadows::glow_strong(p.primary), // Stronger glow on hover
             ..base
         },
         button::Status::Pressed => button::Style {
             background: Some(Background::Color(p.primary_dark)),
+            shadow: shadows::subtle(), // Pressed down feel
             ..base
         },
         button::Status::Disabled => button::Style {
             background: Some(Background::Color(p.text_muted)),
             text_color: p.surface,
+            shadow: shadows::none(),
             ..base
         },
     }
@@ -114,19 +117,20 @@ pub fn folder_button_style(_theme: &iced::Theme, status: button::Status) -> butt
     }
 }
 
-/// Selected folder button style - terminal highlight.
+/// Selected folder button style - Air-style left accent border.
 pub fn folder_button_selected_style(_theme: &iced::Theme, status: button::Status) -> button::Style {
     let p = palette::current();
 
+    // Air uses a subtle background tint with left border accent
     let base = button::Style {
         background: Some(Background::Color(p.selected)),
         text_color: p.primary,
         border: Border {
-            color: p.selected_border,
-            width: 1.0, // Consistent border width
-            radius: radius::MEDIUM.into(),
+            color: p.primary, // Indigo accent on left (simulated with full border)
+            width: 2.0,       // Visible accent
+            radius: radius::SMALL.into(),
         },
-        shadow: shadows::none(), // No shadows in terminal UI
+        shadow: shadows::none(),
         snap: false,
     };
 
@@ -155,6 +159,40 @@ pub fn message_button_style(_theme: &iced::Theme, status: button::Status) -> but
         button::Status::Active | button::Status::Disabled => base,
         button::Status::Hovered => button::Style {
             background: Some(Background::Color(p.hover)),
+            ..base
+        },
+        button::Status::Pressed => button::Style {
+            background: Some(Background::Color(p.selected)),
+            ..base
+        },
+    }
+}
+
+/// Ghost button style - transparent with subtle border on hover.
+pub fn ghost_button_style(_theme: &iced::Theme, status: button::Status) -> button::Style {
+    let p = palette::current();
+
+    let base = button::Style {
+        background: Some(Background::Color(Color::TRANSPARENT)),
+        text_color: p.text_primary,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: radius::MEDIUM.into(),
+        },
+        shadow: shadows::none(),
+        snap: false,
+    };
+
+    match status {
+        button::Status::Active | button::Status::Disabled => base,
+        button::Status::Hovered => button::Style {
+            background: Some(Background::Color(p.hover)),
+            border: Border {
+                color: p.border_subtle,
+                width: 1.0,
+                radius: radius::MEDIUM.into(),
+            },
             ..base
         },
         button::Status::Pressed => button::Style {

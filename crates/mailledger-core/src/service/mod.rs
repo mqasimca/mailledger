@@ -8,7 +8,8 @@ pub mod smtp;
 
 pub use mail::{
     Attachment, AuthClient, Folder, FolderType, IdleEvent, MailServiceError, MessageContent,
-    MessageSummary, SelectedClient, connect_and_login, fetch_message_content, fetch_messages,
-    idle_monitor, list_folders, mark_read, mark_unread, select_folder, toggle_flag,
+    MessageSummary, SearchCriteria, SelectedClient, archive_message, connect_and_login,
+    download_attachment, fetch_message_content, fetch_messages, idle_monitor, list_folders,
+    mark_read, mark_unread, search_messages, select_folder, toggle_flag,
 };
 pub use smtp::{OutgoingMessage, SmtpError, send_email};

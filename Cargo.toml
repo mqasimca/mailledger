@@ -48,7 +48,12 @@ iced = { version = "0.14", default-features = false, features = [
     "web-colors",
     "crisp",
     "image",
+    "markdown",
+    "highlighter",
 ] }
+
+# HTML to Markdown conversion
+htmd = "0.1"
 
 # Error handling
 thiserror = "2"
@@ -72,6 +77,9 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 
 # Directories
 dirs = "6"
+
+# Desktop notifications
+notify-rust = "4"
 
 # Secure credential storage
 # On Linux: uses Secret Service (GNOME Keyring, KWallet via D-Bus)

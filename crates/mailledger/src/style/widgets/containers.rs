@@ -7,31 +7,31 @@ use super::palette;
 use super::shadows;
 use super::shadows::radius;
 
-/// Header bar style - flat terminal style.
+/// Header bar style - Air's navigation style with bottom border.
 pub fn header_style(_theme: &iced::Theme) -> container::Style {
     let p = palette::current();
 
     container::Style {
-        background: Some(Background::Color(p.surface_elevated)),
+        background: Some(Background::Color(p.surface)),
         border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
+            color: p.border_subtle, // Subtle bottom border
+            width: 1.0,
             radius: radius::NONE.into(),
         },
-        shadow: shadows::none(), // No shadows in terminal UI
+        shadow: shadows::none(),
         ..Default::default()
     }
 }
 
-/// Sidebar style - subtle depth with rounded edges on panels.
+/// Sidebar style - Air's elevated surface with right border.
 pub fn sidebar_style(_theme: &iced::Theme) -> container::Style {
     let p = palette::current();
 
     container::Style {
-        background: Some(Background::Color(p.background)),
+        background: Some(Background::Color(p.surface)), // Elevated surface
         border: Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
+            color: p.border_subtle, // Subtle right border
+            width: 1.0,
             radius: radius::NONE.into(),
         },
         ..Default::default()
@@ -151,6 +151,22 @@ pub fn toolbar_style(_theme: &iced::Theme) -> container::Style {
             radius: radius::NONE.into(),
         },
         shadow: shadows::none(), // No shadows in terminal UI
+        ..Default::default()
+    }
+}
+
+/// Elevated card style - for sender cards, etc.
+pub fn elevated_card_style(_theme: &iced::Theme) -> container::Style {
+    let p = palette::current();
+
+    container::Style {
+        background: Some(Background::Color(p.surface_elevated)),
+        border: Border {
+            color: p.border_subtle,
+            width: 1.0,
+            radius: radius::MEDIUM.into(),
+        },
+        shadow: shadows::subtle(),
         ..Default::default()
     }
 }

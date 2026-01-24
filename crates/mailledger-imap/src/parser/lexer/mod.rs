@@ -216,13 +216,18 @@ impl<'a> Lexer<'a> {
             return Err(self.error("Expected CRLF after literal size"));
         }
 
-        // Read literal data
-        if self.pos + size > self.input.len() {
+        // Read literal data - check for overflow and bounds
+        let end_pos = self
+            .pos
+            .checked_add(size)
+            .ok_or_else(|| self.error("Literal size too large (overflow)"))?;
+
+        if end_pos > self.input.len() {
             return Err(self.error("Incomplete literal data"));
         }
 
-        let data = self.input[self.pos..self.pos + size].to_vec();
-        self.skip(size);
+        let data = self.input[self.pos..end_pos].to_vec();
+        self.pos = end_pos;
 
         Ok(Token::Literal(data))
     }
@@ -394,7 +399,15 @@ pub const fn is_atom_special(b: u8) -> bool {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::redundant_clone, clippy::manual_string_new, clippy::needless_collect, clippy::unreadable_literal, clippy::used_underscore_items, clippy::similar_names)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::redundant_clone,
+    clippy::manual_string_new,
+    clippy::needless_collect,
+    clippy::unreadable_literal,
+    clippy::used_underscore_items,
+    clippy::similar_names
+)]
 mod tests {
     use super::*;
 
@@ -515,5 +528,144 @@ mod tests {
         assert!(!is_atom_char(b'('));
         assert!(!is_atom_char(b')'));
         assert!(!is_atom_char(b'{'));
+    }
+
+    #[test]
+    fn test_literal_overflow_detection() {
+        // Test that we detect overflow in literal size calculation
+        let input = format!("{{{}}}\r\ndata", usize::MAX);
+        let mut lexer = Lexer::new(input.as_bytes());
+
+        let result = lexer.next_token();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("overflow"));
+    }
+
+    #[test]
+    fn test_literal_incomplete() {
+        // Literal claims 100 bytes but only 5 provided
+        let mut lexer = Lexer::new(b"{100}\r\nhello");
+        let result = lexer.next_token();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Incomplete"));
+    }
+
+    #[test]
+    fn test_quoted_string_eof() {
+        let mut lexer = Lexer::new(b"\"unfinished");
+        let result = lexer.next_token();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("EOF"));
+    }
+
+    #[test]
+    fn test_quoted_string_invalid_escape() {
+        let mut lexer = Lexer::new(b"\"hello\\nworld\"");
+        let result = lexer.next_token();
+        // \n is not a valid escape in IMAP, only \" and \\
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_number_overflow() {
+        // Number larger than u32::MAX
+        let input = "99999999999999999999";
+        let mut lexer = Lexer::new(input.as_bytes());
+        let result = lexer.next_token();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("too large"));
+    }
+
+    #[test]
+    fn test_literal_plus() {
+        let mut lexer = Lexer::new(b"{5+}\r\nhello");
+        match lexer.next_token().unwrap() {
+            Token::Literal(data) => assert_eq!(data, b"hello"),
+            other => panic!("Expected literal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_read_nstring_nil() {
+        let mut lexer = Lexer::new(b"NIL");
+        let result = lexer.read_nstring().unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_read_number() {
+        let mut lexer = Lexer::new(b"12345");
+        let num = lexer.read_number().unwrap();
+        assert_eq!(num, 12345);
+    }
+
+    #[test]
+    fn test_peek_at() {
+        let lexer = Lexer::new(b"ABC");
+        assert_eq!(lexer.peek_at(0), Some(b'A'));
+        assert_eq!(lexer.peek_at(1), Some(b'B'));
+        assert_eq!(lexer.peek_at(2), Some(b'C'));
+        assert_eq!(lexer.peek_at(3), None);
+    }
+}
+
+// Property-based tests using proptest
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn prop_atom_roundtrip(s in "[a-zA-Z0-9_-]{1,100}") {
+            let mut lexer = Lexer::new(s.as_bytes());
+            if let Ok(Token::Atom(parsed)) = lexer.next_token() {
+                assert_eq!(parsed, s);
+            }
+        }
+
+        #[test]
+        fn prop_number_roundtrip(n in 0u32..1_000_000u32) {
+            let input = n.to_string();
+            let mut lexer = Lexer::new(input.as_bytes());
+            if let Ok(Token::Number(parsed)) = lexer.next_token() {
+                assert_eq!(parsed, n);
+            }
+        }
+
+        #[test]
+        fn prop_quoted_string_roundtrip(s in "[^\"\\\\]{1,100}") {
+            // String without quotes or backslashes
+            let input = format!("\"{}\"", s);
+            let mut lexer = Lexer::new(input.as_bytes());
+            if let Ok(Token::QuotedString(parsed)) = lexer.next_token() {
+                assert_eq!(parsed, s);
+            }
+        }
+
+        #[test]
+        fn prop_literal_roundtrip(data in prop::collection::vec(any::<u8>(), 0..100)) {
+            let input = format!("{{{}}}\r\n", data.len());
+            let mut full_input = input.into_bytes();
+            full_input.extend_from_slice(&data);
+
+            let mut lexer = Lexer::new(&full_input);
+            if let Ok(Token::Literal(parsed)) = lexer.next_token() {
+                assert_eq!(parsed, data);
+            }
+        }
+
+        #[test]
+        fn prop_no_crash_on_random_input(data in prop::collection::vec(any::<u8>(), 0..1000)) {
+            // Should not panic on any input
+            let mut lexer = Lexer::new(&data);
+            while !lexer.is_eof() {
+                let _ = lexer.next_token();
+                // If there's an error, that's fine - just shouldn't crash
+                if lexer.is_eof() {
+                    break;
+                }
+            }
+        }
     }
 }

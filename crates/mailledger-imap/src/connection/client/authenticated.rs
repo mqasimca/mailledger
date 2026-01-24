@@ -1,7 +1,6 @@
 //! Implementation for the authenticated state.
 
 use std::fmt::Write;
-use std::marker::PhantomData;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -18,7 +17,16 @@ where
 {
     /// Selects a mailbox for read-write access.
     ///
-    /// Consumes self and returns a selected client on success.
+    /// Consumes self and returns a selected client on success. The returned
+    /// client carries information about the selected mailbox.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let (client, _) = client.select("INBOX").await?;
+    /// println!("Selected: {}", client.mailbox());
+    /// println!("Messages: {}", client.exists());
+    /// ```
     pub async fn select(mut self, mailbox: &str) -> Result<(Client<S, Selected>, MailboxStatus)> {
         let tag = self.tag_gen.next();
         let cmd = Command::Select {
@@ -38,7 +46,7 @@ where
                 stream: self.stream,
                 tag_gen: self.tag_gen,
                 capabilities: self.capabilities,
-                _state: PhantomData,
+                state: Selected::new(mailbox, false, status.clone()),
             },
             status,
         ))
@@ -46,7 +54,8 @@ where
 
     /// Examines a mailbox for read-only access.
     ///
-    /// Consumes self and returns a selected client on success.
+    /// Consumes self and returns a selected client on success. The client
+    /// will be in read-only mode.
     pub async fn examine(mut self, mailbox: &str) -> Result<(Client<S, Selected>, MailboxStatus)> {
         let tag = self.tag_gen.next();
         let cmd = Command::Examine {
@@ -65,7 +74,7 @@ where
                 stream: self.stream,
                 tag_gen: self.tag_gen,
                 capabilities: self.capabilities,
-                _state: PhantomData,
+                state: Selected::new(mailbox, true, status.clone()),
             },
             status,
         ))

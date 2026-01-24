@@ -5,12 +5,27 @@ use chrono::{DateTime, Local};
 
 /// Parses a "from" field into name and email parts.
 fn parse_from_field(from: &str) -> (String, String) {
+    // Find the last '<' that is not inside quotes
+    let mut in_quotes = false;
+    let mut last_angle = None;
+    let mut last_close_angle = None;
+
+    for (i, c) in from.char_indices() {
+        match c {
+            '"' => in_quotes = !in_quotes,
+            '<' if !in_quotes => last_angle = Some(i),
+            '>' if !in_quotes => last_close_angle = Some(i),
+            _ => {}
+        }
+    }
+
     // Try to parse "Name <email@example.com>" format
-    if let Some(start) = from.rfind('<')
-        && let Some(end) = from.rfind('>')
+    if let Some(start) = last_angle
+        && let Some(end) = last_close_angle
+        && end > start
     {
         let email = from[start + 1..end].to_string();
-        let name = from[..start].trim().to_string();
+        let name = from[..start].trim().trim_matches('"').to_string();
         // If name is empty, use email
         if name.is_empty() {
             return (email.clone(), email);
@@ -72,6 +87,12 @@ pub struct MessageSummary {
     pub is_flagged: bool,
     /// Whether the message has attachments.
     pub has_attachments: bool,
+    /// Thread ID for grouping related messages.
+    pub thread_id: Option<String>,
+    /// Message-ID header.
+    pub message_id: Option<String>,
+    /// In-Reply-To header.
+    pub in_reply_to: Option<String>,
 }
 
 /// Full message content for display in the message view.
@@ -96,6 +117,24 @@ pub struct MessageContent {
     pub body_text: Option<String>,
     /// HTML body (sanitized).
     pub body_html: Option<String>,
+    /// Attachments.
+    pub attachments: Vec<Attachment>,
+}
+
+/// An attachment in a message.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Some fields will be used when inline preview is implemented
+pub struct Attachment {
+    /// Filename.
+    pub filename: String,
+    /// MIME type.
+    pub mime_type: String,
+    /// Size in bytes.
+    pub size: u64,
+    /// Part number for fetching.
+    pub part_number: String,
+    /// Content-Transfer-Encoding.
+    pub encoding: String,
 }
 
 impl MessageSummary {
@@ -117,6 +156,9 @@ impl MessageSummary {
             is_read: core_msg.is_read,
             is_flagged: core_msg.is_flagged,
             has_attachments: core_msg.has_attachment,
+            thread_id: core_msg.thread_id.clone(),
+            message_id: core_msg.message_id.clone(),
+            in_reply_to: core_msg.in_reply_to.clone(),
         }
     }
 
@@ -136,6 +178,9 @@ impl MessageSummary {
                 is_read: false,
                 is_flagged: false,
                 has_attachments: false,
+                thread_id: None,
+                message_id: Some("<msg1@example.com>".into()),
+                in_reply_to: None,
             },
             Self {
                 id: MessageId(2),
@@ -148,6 +193,9 @@ impl MessageSummary {
                 is_read: true,
                 is_flagged: false,
                 has_attachments: true,
+                thread_id: None,
+                message_id: Some("<msg2@example.com>".into()),
+                in_reply_to: None,
             },
             Self {
                 id: MessageId(3),
@@ -160,6 +208,9 @@ impl MessageSummary {
                 is_read: true,
                 is_flagged: true,
                 has_attachments: true,
+                thread_id: None,
+                message_id: Some("<msg3@example.com>".into()),
+                in_reply_to: None,
             },
             Self {
                 id: MessageId(4),
@@ -172,6 +223,9 @@ impl MessageSummary {
                 is_read: true,
                 is_flagged: false,
                 has_attachments: false,
+                thread_id: Some("<quarterly-report@example.com>".into()),
+                message_id: Some("<msg4@example.com>".into()),
+                in_reply_to: Some("<quarterly-report@example.com>".into()),
             },
             Self {
                 id: MessageId(5),
@@ -184,6 +238,9 @@ impl MessageSummary {
                 is_read: false,
                 is_flagged: false,
                 has_attachments: false,
+                thread_id: None,
+                message_id: Some("<msg5@example.com>".into()),
+                in_reply_to: None,
             },
         ]
     }
@@ -205,6 +262,11 @@ impl MessageContent {
             date: format_date_local(&core_content.date),
             body_text: core_content.body_text.clone(),
             body_html: core_content.body_html.clone(),
+            attachments: core_content
+                .attachments
+                .iter()
+                .map(Attachment::from_core)
+                .collect(),
         }
     }
 
@@ -225,6 +287,110 @@ impl MessageContent {
                 summary.snippet, summary.from_name
             )),
             body_html: None,
+            attachments: vec![],
         }
+    }
+}
+
+impl Attachment {
+    /// Creates an attachment from core service data.
+    #[must_use]
+    pub fn from_core(core_attachment: &mailledger_core::Attachment) -> Self {
+        Self {
+            filename: core_attachment.filename.clone(),
+            mime_type: core_attachment.mime_type.clone(),
+            size: core_attachment.size,
+            part_number: core_attachment.part_number.clone(),
+            encoding: core_attachment.encoding.clone(),
+        }
+    }
+
+    /// Returns a human-readable size string (e.g., "1.5 MB").
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)] // Acceptable for display purposes
+    pub fn size_display(&self) -> String {
+        const KB: u64 = 1024;
+        const MB: u64 = 1024 * KB;
+
+        if self.size >= MB {
+            format!("{:.1} MB", self.size as f64 / MB as f64)
+        } else if self.size >= KB {
+            format!("{:.1} KB", self.size as f64 / KB as f64)
+        } else {
+            format!("{} B", self.size)
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::redundant_clone,
+    clippy::manual_string_new,
+    clippy::needless_collect,
+    clippy::unreadable_literal,
+    clippy::used_underscore_items,
+    clippy::similar_names
+)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_from_field_simple() {
+        let (name, email) = parse_from_field("user@example.com");
+        assert_eq!(name, "user@example.com");
+        assert_eq!(email, "user@example.com");
+    }
+
+    #[test]
+    fn test_parse_from_field_with_name() {
+        let (name, email) = parse_from_field("John Doe <john@example.com>");
+        assert_eq!(name, "John Doe");
+        assert_eq!(email, "john@example.com");
+    }
+
+    #[test]
+    fn test_parse_from_field_quoted_name() {
+        let (name, email) = parse_from_field("\"John Doe\" <john@example.com>");
+        assert_eq!(name, "John Doe");
+        assert_eq!(email, "john@example.com");
+    }
+
+    #[test]
+    fn test_parse_from_field_angle_brackets_in_quotes() {
+        // Test that angle brackets inside quotes don't confuse the parser
+        let (name, email) = parse_from_field("\"John <Admin>\" <john@example.com>");
+        assert_eq!(name, "John <Admin>");
+        assert_eq!(email, "john@example.com");
+    }
+
+    #[test]
+    fn test_parse_from_field_empty_name() {
+        let (name, email) = parse_from_field("<user@example.com>");
+        assert_eq!(name, "user@example.com");
+        assert_eq!(email, "user@example.com");
+    }
+
+    #[test]
+    fn test_parse_from_field_complex() {
+        let (name, email) = parse_from_field("\"O'Brien, Patrick\" <patrick.obrien@example.com>");
+        assert_eq!(name, "O'Brien, Patrick");
+        assert_eq!(email, "patrick.obrien@example.com");
+    }
+
+    #[test]
+    fn test_format_date_local() {
+        let date = "Thu, 15 Jan 2026 19:31:43 +0000";
+        let formatted = format_date_local(date);
+        // Should parse successfully (exact format depends on local timezone)
+        assert!(!formatted.is_empty());
+    }
+
+    #[test]
+    fn test_format_date_local_invalid() {
+        let date = "invalid date";
+        let formatted = format_date_local(date);
+        // Should return original on parse failure
+        assert_eq!(formatted, "invalid date");
     }
 }

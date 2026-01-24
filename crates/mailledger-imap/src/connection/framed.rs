@@ -19,6 +19,9 @@ const DEFAULT_BUFFER_SIZE: usize = 8192;
 /// Maximum line length to prevent memory exhaustion.
 const MAX_LINE_LENGTH: usize = 1024 * 1024; // 1 MB
 
+/// Maximum literal size to prevent memory exhaustion.
+const MAX_LITERAL_SIZE: usize = 100 * 1024 * 1024; // 100 MB
+
 /// Framed connection for IMAP protocol.
 ///
 /// Handles line-based reading with literal support and buffered writing.
@@ -55,6 +58,12 @@ where
 
             // Check for literal at end of line: {123} or {123+}
             if let Some(literal_len) = parse_literal_length(&line) {
+                // Validate literal size to prevent DoS via memory exhaustion
+                if literal_len > MAX_LITERAL_SIZE {
+                    return Err(crate::Error::Protocol(format!(
+                        "literal too large: {literal_len} bytes (max {MAX_LITERAL_SIZE})"
+                    )));
+                }
                 // Read the literal data
                 let mut literal = vec![0u8; literal_len];
                 self.reader.read_exact(&mut literal).await?;
@@ -228,7 +237,15 @@ impl ResponseAccumulator {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::redundant_clone, clippy::manual_string_new, clippy::needless_collect, clippy::unreadable_literal, clippy::used_underscore_items, clippy::similar_names)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::redundant_clone,
+    clippy::manual_string_new,
+    clippy::needless_collect,
+    clippy::unreadable_literal,
+    clippy::used_underscore_items,
+    clippy::similar_names
+)]
 mod tests {
     use super::*;
 
@@ -309,5 +326,61 @@ mod tests {
         assert_eq!(responses[0], b"* CAPABILITY IMAP4rev2\r\n");
         assert_eq!(responses[1], b"* OK IMAP ready\r\n");
         assert_eq!(responses[2], b"A001 OK Success\r\n");
+    }
+
+    #[tokio::test]
+    async fn test_literal_size_validation() {
+        use tokio_test::io::Builder;
+
+        // Test that excessively large literals are rejected
+        let literal_size = MAX_LITERAL_SIZE + 1;
+        let header = format!("* 1 FETCH (BODY {{{literal_size}}}\r\n");
+
+        let mock = Builder::new().read(header.as_bytes()).build();
+        let mut framed = FramedStream::new(mock);
+
+        let result = framed.read_response().await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("literal too large")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_literal_max_size_allowed() {
+        use tokio_test::io::Builder;
+
+        // Test that the maximum allowed literal size works
+        let literal_size = 1000; // Small literal for testing
+        let header = format!("* 1 FETCH (BODY {{{literal_size}}}\r\n");
+        let literal_data = vec![b'X'; literal_size];
+        let trailer = b")\r\n";
+
+        let mock = Builder::new()
+            .read(header.as_bytes())
+            .read(&literal_data)
+            .read(trailer)
+            .build();
+        let mut framed = FramedStream::new(mock);
+
+        let result = framed.read_response().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_line_length_limit() {
+        use tokio_test::io::Builder;
+
+        // Create a line longer than MAX_LINE_LENGTH
+        let long_line = "A".repeat(MAX_LINE_LENGTH + 100);
+        let mock = Builder::new().read(long_line.as_bytes()).build();
+        let mut framed = FramedStream::new(mock);
+
+        let result = framed.read_response().await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("line too long"));
     }
 }

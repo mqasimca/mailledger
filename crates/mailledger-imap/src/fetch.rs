@@ -208,9 +208,16 @@ impl BatchedFetch {
         let mut start = 1u32;
 
         while start <= total {
-            let end = (start + batch_size - 1).min(total);
+            let end = start
+                .saturating_add(batch_size)
+                .saturating_sub(1)
+                .min(total);
             batches.push((start, end));
-            start = end + 1;
+            // Use checked_add to prevent overflow
+            start = match end.checked_add(1) {
+                Some(next) => next,
+                None => break, // Overflow, we're done
+            };
         }
 
         batches
@@ -381,7 +388,15 @@ impl BatchOrder {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::redundant_clone, clippy::manual_string_new, clippy::needless_collect, clippy::unreadable_literal, clippy::used_underscore_items, clippy::similar_names)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::redundant_clone,
+    clippy::manual_string_new,
+    clippy::needless_collect,
+    clippy::unreadable_literal,
+    clippy::used_underscore_items,
+    clippy::similar_names
+)]
 mod tests {
     use super::*;
 

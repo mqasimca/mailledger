@@ -7,7 +7,9 @@ mod model;
 mod repository;
 mod validation;
 
-pub use credentials::{CredentialError, CredentialResult};
+pub use credentials::{
+    CredentialError, CredentialResult, CredentialStore, KeyringCredentialStore, NoopCredentialStore,
+};
 pub use model::{Account, AccountId, ImapConfig, Security, SmtpConfig};
 pub use repository::AccountRepository;
 pub use validation::{ValidationError, ValidationResult, validate_account};

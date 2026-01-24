@@ -247,6 +247,14 @@ impl Pipeline {
     /// Returns `true` if the tag was in-flight, `false` otherwise.
     pub fn complete(&mut self, tag: &Tag) -> bool {
         if let Some(pos) = self.in_flight.iter().position(|t| t == tag) {
+            // Warn if responses arrive out of order
+            if pos != 0 {
+                tracing::warn!(
+                    "received response for tag {:?} out of order (expected {:?})",
+                    tag,
+                    self.in_flight.front()
+                );
+            }
             self.in_flight.remove(pos);
             true
         } else {
@@ -371,7 +379,15 @@ pub fn batch_commands(commands: Vec<Command>) -> Vec<Vec<Command>> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::redundant_clone, clippy::manual_string_new, clippy::needless_collect, clippy::unreadable_literal, clippy::used_underscore_items, clippy::similar_names)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::redundant_clone,
+    clippy::manual_string_new,
+    clippy::needless_collect,
+    clippy::unreadable_literal,
+    clippy::used_underscore_items,
+    clippy::similar_names
+)]
 mod tests {
     use super::*;
     use crate::types::Mailbox;

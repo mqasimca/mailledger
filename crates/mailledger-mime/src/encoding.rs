@@ -103,8 +103,14 @@ pub fn decode_quoted_printable(text: &str) -> Result<String> {
                     "Incomplete escape sequence".to_string(),
                 ));
             }
-        } else {
+        } else if ch.is_ascii() {
+            // ASCII characters can be safely cast to u8
             result.push(ch as u8);
+        } else {
+            // Non-ASCII characters need UTF-8 encoding
+            let mut buf = [0u8; 4];
+            let bytes = ch.encode_utf8(&mut buf);
+            result.extend_from_slice(bytes.as_bytes());
         }
     }
 
@@ -177,7 +183,15 @@ pub fn decode_rfc2047(text: &str) -> Result<String> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::redundant_clone, clippy::manual_string_new, clippy::needless_collect, clippy::unreadable_literal, clippy::used_underscore_items, clippy::similar_names)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::redundant_clone,
+    clippy::manual_string_new,
+    clippy::needless_collect,
+    clippy::unreadable_literal,
+    clippy::used_underscore_items,
+    clippy::similar_names
+)]
 mod tests {
     use super::*;
 
@@ -248,5 +262,38 @@ mod tests {
         let encoded = "=?utf-8?Q?H=C3=A9llo?=";
         let decoded = decode_rfc2047(encoded).unwrap();
         assert_eq!(decoded, "Héllo");
+    }
+
+    #[test]
+    fn test_quoted_printable_decode_non_ascii() {
+        // Test that non-ASCII characters in the input are properly handled
+        let encoded = "Héllo=C3=A9";
+        let decoded = decode_quoted_printable(encoded).unwrap();
+        // The non-ASCII 'é' at the start should be preserved as UTF-8
+        assert!(decoded.contains("Héllo"));
+    }
+
+    #[test]
+    fn test_quoted_printable_decode_mixed() {
+        // Test mixed ASCII and non-ASCII
+        let encoded = "Hello=20World!=C3=A9";
+        let decoded = decode_quoted_printable(encoded).unwrap();
+        assert_eq!(decoded, "Hello World!é");
+    }
+
+    #[test]
+    fn test_quoted_printable_encode_non_ascii() {
+        let text = "Café";
+        let encoded = encode_quoted_printable(text);
+        // Non-ASCII characters should be encoded
+        assert!(encoded.contains("Caf=C3=A9"));
+    }
+
+    #[test]
+    fn test_base64_decode_with_whitespace() {
+        // Base64 decoder should handle whitespace
+        let encoded = "SGVs\nbG8s\nIFdv\ncmxk\nIQ==";
+        let decoded = decode_base64(&encoded.replace('\n', "")).unwrap();
+        assert_eq!(decoded, b"Hello, World!");
     }
 }

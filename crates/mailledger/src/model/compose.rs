@@ -1,5 +1,17 @@
 //! Compose message model.
 
+/// Which address field is currently being autocompleted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AutocompleteField {
+    /// To field.
+    #[default]
+    To,
+    /// Cc field.
+    Cc,
+    /// Bcc field.
+    Bcc,
+}
+
 /// State for the compose message form.
 #[derive(Debug, Clone, Default)]
 pub struct ComposeState {
@@ -11,7 +23,8 @@ pub struct ComposeState {
     pub bcc: String,
     /// Subject line.
     pub subject: String,
-    /// Message body.
+    /// Message body (kept for backward compatibility, actual body is in `text_editor::Content`).
+    #[allow(dead_code)]
     pub body: String,
     /// Whether we're currently sending.
     pub is_sending: bool,
@@ -19,6 +32,12 @@ pub struct ComposeState {
     pub send_error: Option<String>,
     /// Success message after sending.
     pub send_success: bool,
+    /// Contact suggestions for autocomplete.
+    pub suggestions: Vec<mailledger_core::Contact>,
+    /// Which field is currently being autocompleted.
+    pub active_autocomplete: Option<AutocompleteField>,
+    /// Index of currently selected suggestion (for keyboard navigation).
+    pub selected_suggestion: usize,
 }
 
 impl ComposeState {
@@ -26,6 +45,74 @@ impl ComposeState {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Sets suggestions and shows autocomplete for a field.
+    pub fn show_suggestions(
+        &mut self,
+        suggestions: Vec<mailledger_core::Contact>,
+        field: AutocompleteField,
+    ) {
+        self.suggestions = suggestions;
+        self.active_autocomplete = Some(field);
+        self.selected_suggestion = 0;
+    }
+
+    /// Clears suggestions and hides autocomplete.
+    pub fn clear_suggestions(&mut self) {
+        self.suggestions.clear();
+        self.active_autocomplete = None;
+        self.selected_suggestion = 0;
+    }
+
+    /// Selects a suggestion and appends it to the appropriate field.
+    pub fn apply_suggestion(&mut self, index: usize) {
+        if let Some(contact) = self.suggestions.get(index) {
+            let email_to_add = contact.display();
+
+            if let Some(field) = self.active_autocomplete {
+                let target = match field {
+                    AutocompleteField::To => &mut self.to,
+                    AutocompleteField::Cc => &mut self.cc,
+                    AutocompleteField::Bcc => &mut self.bcc,
+                };
+
+                // Find and replace the current incomplete entry
+                // Split by comma, replace last entry with the contact, rejoin
+                let mut parts: Vec<&str> = target.split(',').collect();
+                if let Some(last) = parts.last_mut() {
+                    *last = "";
+                }
+                let mut new_value = parts.join(",").trim_end_matches(',').to_string();
+                if !new_value.is_empty() {
+                    new_value.push_str(", ");
+                }
+                new_value.push_str(&email_to_add);
+
+                *target = new_value;
+            }
+
+            self.clear_suggestions();
+        }
+    }
+
+    /// Moves selection up in suggestions list.
+    #[allow(dead_code)] // Will be used for arrow key navigation
+    pub fn select_previous(&mut self) {
+        if !self.suggestions.is_empty() {
+            self.selected_suggestion = self
+                .selected_suggestion
+                .checked_sub(1)
+                .unwrap_or(self.suggestions.len() - 1);
+        }
+    }
+
+    /// Moves selection down in suggestions list.
+    #[allow(dead_code)] // Will be used for arrow key navigation
+    pub const fn select_next(&mut self) {
+        if !self.suggestions.is_empty() {
+            self.selected_suggestion = (self.selected_suggestion + 1) % self.suggestions.len();
+        }
     }
 
     /// Creates a compose state for a reply.
@@ -89,10 +176,21 @@ impl ComposeState {
         None
     }
 
-    /// Converts to `OutgoingMessage` for sending.
+    /// Converts to `OutgoingMessage` for sending (uses self.body).
     #[must_use]
+    #[allow(dead_code)] // Kept for backward compatibility
     pub fn to_outgoing(&self, from: &str) -> mailledger_core::OutgoingMessage {
-        let mut msg = mailledger_core::OutgoingMessage::new(from, &self.subject, &self.body);
+        self.to_outgoing_with_body(from, &self.body)
+    }
+
+    /// Converts to `OutgoingMessage` for sending with explicit body.
+    #[must_use]
+    pub fn to_outgoing_with_body(
+        &self,
+        from: &str,
+        body: &str,
+    ) -> mailledger_core::OutgoingMessage {
+        let mut msg = mailledger_core::OutgoingMessage::new(from, &self.subject, body);
 
         // Parse recipients
         for recipient in self.to.split(',') {

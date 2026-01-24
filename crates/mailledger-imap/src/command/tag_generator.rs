@@ -24,9 +24,18 @@ impl TagGenerator {
     }
 
     /// Generates the next tag.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the tag counter would overflow u32::MAX. In practice, this
+    /// would require 4+ billion tags in a single session, which is unrealistic.
     #[must_use]
     pub fn next(&self) -> String {
         let n = self.counter.fetch_add(1, Ordering::Relaxed);
+        // Check for overflow - if we've wrapped, the session is invalid
+        if n == u32::MAX {
+            panic!("tag counter overflow: generated {} tags in this session", n);
+        }
         format!("{}{:04}", self.prefix, n)
     }
 
@@ -58,7 +67,15 @@ impl Clone for TagGenerator {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::redundant_clone, clippy::manual_string_new, clippy::needless_collect, clippy::unreadable_literal, clippy::used_underscore_items, clippy::similar_names)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::redundant_clone,
+    clippy::manual_string_new,
+    clippy::needless_collect,
+    clippy::unreadable_literal,
+    clippy::used_underscore_items,
+    clippy::similar_names
+)]
 mod tests {
     use super::*;
 
@@ -92,5 +109,39 @@ mod tests {
         assert_eq!(generator.current(), 0);
         let _ = generator.next();
         assert_eq!(generator.current(), 1);
+    }
+
+    #[test]
+    fn test_uniqueness() {
+        let generator = TagGenerator::default();
+        let mut seen = std::collections::HashSet::new();
+
+        // Generate 10000 tags and ensure all are unique
+        for _ in 0..10000 {
+            let tag = generator.next();
+            assert!(seen.insert(tag), "duplicate tag generated");
+        }
+    }
+
+    #[test]
+    fn test_format() {
+        let generator = TagGenerator::new('X');
+        assert_eq!(generator.next(), "X0000");
+        assert_eq!(generator.next(), "X0001");
+        // Verify padding is correct
+        for _ in 2..100 {
+            let _ = generator.next();
+        }
+        assert_eq!(generator.next(), "X0100");
+    }
+
+    #[test]
+    #[should_panic(expected = "tag counter overflow")]
+    fn test_overflow_detection() {
+        let generator = TagGenerator::default();
+        // Set counter to near max
+        generator.counter.store(u32::MAX, Ordering::Relaxed);
+        // This should panic
+        let _ = generator.next();
     }
 }

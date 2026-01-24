@@ -30,6 +30,8 @@ reqwest = { workspace = true }
 rustls = { workspace = true }
 opener = { workspace = true }
 chrono = { workspace = true }
+htmd = { workspace = true }
+notify-rust = { workspace = true }
 
 [lints]
 workspace = true

@@ -7,6 +7,7 @@ Cross-platform desktop email client with custom IMAP implementation in Rust.
 | Aspect | Choice |
 |--------|--------|
 | Language | Rust (Edition 2024) |
+| Rust Version | 1.88+ |
 | GUI | iced (Elm Architecture) |
 | Async | tokio |
 | TLS | rustls |
@@ -26,9 +27,46 @@ RUST_LOG=debug cargo run -p mailledger  # Run
 
 ```
 crates/
-├── mailledger-imap/    # IMAP protocol library
+├── mailledger/         # GUI application (iced)
 ├── mailledger-core/    # Business logic, storage
-└── mailledger/         # GUI application
+├── mailledger-imap/    # IMAP protocol library
+├── mailledger-smtp/    # SMTP protocol library
+├── mailledger-oauth/   # OAuth2 authentication
+└── mailledger-mime/    # MIME parsing
+```
+
+### Crate Dependencies
+
+```
+mailledger (GUI)
+└── mailledger-core
+    ├── mailledger-imap
+    │   └── mailledger-oauth
+    ├── mailledger-smtp
+    ├── mailledger-oauth
+    └── mailledger-mime
+```
+
+Leaf crates (`-smtp`, `-oauth`, `-mime`) have no internal dependencies.
+
+## Key Entry Points
+
+| File | Purpose |
+|------|---------|
+| `crates/mailledger/src/main.rs` | GUI application entry |
+| `crates/mailledger-imap/src/lib.rs` | IMAP client API |
+| `crates/mailledger-core/src/lib.rs` | Core business logic |
+
+## Examples
+
+```bash
+# OAuth2 device flow (Outlook)
+OAUTH_CLIENT_ID=your_id OAUTH_EMAIL=you@outlook.com \
+  cargo run --example outlook_oauth2 -p mailledger-oauth
+
+# IMAP login test
+OAUTH_CLIENT_ID=your_id OAUTH_EMAIL=you@outlook.com \
+  cargo run --example outlook_login -p mailledger-imap
 ```
 
 ## Patterns
@@ -64,6 +102,14 @@ See `.claude/rules/` for guidelines:
 2. **NO** `unsafe` without `// SAFETY:` comment
 3. **NO** blocking in async → use `spawn_blocking`
 4. **NO** `clone()` to satisfy borrow checker → understand ownership
+
+## Testing
+
+```bash
+cargo test --workspace                    # All tests
+cargo test -p mailledger-imap             # Single crate
+cargo test -p mailledger-imap parser      # Filter by name
+```
 
 ## Git
 

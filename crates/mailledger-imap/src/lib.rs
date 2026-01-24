@@ -107,15 +107,16 @@ pub mod pipeline;
 pub mod protocol;
 pub mod qresync;
 pub mod quirks;
+pub mod stream_fetch;
 pub mod time;
 pub mod types;
 
 pub use command::{Command, FetchAttribute, FetchItems, SearchCriteria, StoreAction, TagGenerator};
 pub use connection::{
     Authenticated, Client, Config, ConfigBuilder, FramedStream, IdleEvent, IdleHandle, ImapStream,
-    NotAuthenticated, ResponseAccumulator, Security, Selected,
+    NotAuthenticated, ResponseAccumulator, Security, Selected, Session, SessionConfig,
 };
-pub use error::{Error, Result};
+pub use error::{CommandContext, Error, Result, ResultExt};
 pub use fetch::{
     BatchConfig, BatchOrder, BatchedFetch, FetchAccumulator, FetchProgress, FetchResult,
 };
@@ -129,6 +130,7 @@ pub use qresync::{
     ChangedMessage, ModSeq, QresyncParams, SyncChanges, SyncState, VanishedResponse,
 };
 pub use quirks::{ServerQuirks, ServerType};
+pub use stream_fetch::{FetchStreamState, FetchedMessage, StreamFetchOptions};
 pub use time::{BoxClock, Clock, MockClock, SystemClock};
 pub use types::{
     Capability, Flag, Flags, ListResponse, Mailbox, MailboxAttribute, MailboxStatus, ResponseCode,

@@ -5,6 +5,12 @@
 //! - Linux: Secret Service (GNOME Keyring, `KWallet`)
 //! - macOS: Keychain
 //! - Windows: Credential Manager
+//!
+//! The [`CredentialStore`] trait abstracts credential storage, with two implementations:
+//! - [`KeyringCredentialStore`]: Uses the real system keyring (for production)
+//! - [`NoopCredentialStore`]: No-op implementation (for testing)
+
+use std::sync::Arc;
 
 use keyring::Entry;
 use tracing::{debug, warn};
@@ -37,6 +43,168 @@ pub enum CredentialError {
 
 /// Result type for credential operations.
 pub type CredentialResult<T> = std::result::Result<T, CredentialError>;
+
+// ============================================================================
+// CredentialStore trait and implementations
+// ============================================================================
+
+/// Abstraction for credential storage operations.
+///
+/// This trait allows swapping the credential storage implementation,
+/// enabling tests to use a no-op implementation that doesn't touch
+/// the real system keyring.
+///
+/// # Errors
+///
+/// All methods return [`CredentialResult`] which may contain a [`CredentialError`]
+/// if the underlying storage operation fails.
+pub trait CredentialStore: Send + Sync + std::fmt::Debug {
+    /// Store IMAP password for an account.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the storage operation fails.
+    fn store_imap_password(&self, account_id: AccountId, password: &str) -> CredentialResult<()>;
+
+    /// Store SMTP password for an account.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the storage operation fails.
+    fn store_smtp_password(&self, account_id: AccountId, password: &str) -> CredentialResult<()>;
+
+    /// Get IMAP password for an account.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the retrieval operation fails.
+    fn get_imap_password(&self, account_id: AccountId) -> CredentialResult<Option<String>>;
+
+    /// Get SMTP password for an account.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the retrieval operation fails.
+    fn get_smtp_password(&self, account_id: AccountId) -> CredentialResult<Option<String>>;
+
+    /// Delete all credentials for an account.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the deletion operation fails.
+    fn delete_credentials(&self, account_id: AccountId) -> CredentialResult<()>;
+}
+
+/// Real credential store using the system keyring.
+///
+/// This is the production implementation that stores credentials
+/// in the platform's native secure storage.
+#[derive(Debug, Clone, Default)]
+pub struct KeyringCredentialStore;
+
+impl KeyringCredentialStore {
+    /// Create a new keyring credential store.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+
+    /// Create as a trait object wrapped in Arc.
+    #[must_use]
+    pub fn arc() -> Arc<dyn CredentialStore> {
+        Arc::new(Self::new())
+    }
+}
+
+impl CredentialStore for KeyringCredentialStore {
+    fn store_imap_password(&self, account_id: AccountId, password: &str) -> CredentialResult<()> {
+        store_imap_password(account_id, password)
+    }
+
+    fn store_smtp_password(&self, account_id: AccountId, password: &str) -> CredentialResult<()> {
+        store_smtp_password(account_id, password)
+    }
+
+    fn get_imap_password(&self, account_id: AccountId) -> CredentialResult<Option<String>> {
+        get_imap_password(account_id)
+    }
+
+    fn get_smtp_password(&self, account_id: AccountId) -> CredentialResult<Option<String>> {
+        get_smtp_password(account_id)
+    }
+
+    fn delete_credentials(&self, account_id: AccountId) -> CredentialResult<()> {
+        delete_credentials(account_id)
+    }
+}
+
+/// No-op credential store for testing.
+///
+/// This implementation does nothing - it returns `Ok(())` for stores
+/// and `Ok(None)` for retrievals. Use this in tests to avoid
+/// polluting the real system keyring.
+#[derive(Debug, Clone, Default)]
+pub struct NoopCredentialStore;
+
+impl NoopCredentialStore {
+    /// Create a new no-op credential store.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+
+    /// Create as a trait object wrapped in Arc.
+    #[must_use]
+    pub fn arc() -> Arc<dyn CredentialStore> {
+        Arc::new(Self::new())
+    }
+}
+
+impl CredentialStore for NoopCredentialStore {
+    fn store_imap_password(&self, account_id: AccountId, _password: &str) -> CredentialResult<()> {
+        debug!(
+            "NoopCredentialStore: skipping IMAP password store for account {}",
+            account_id.0
+        );
+        Ok(())
+    }
+
+    fn store_smtp_password(&self, account_id: AccountId, _password: &str) -> CredentialResult<()> {
+        debug!(
+            "NoopCredentialStore: skipping SMTP password store for account {}",
+            account_id.0
+        );
+        Ok(())
+    }
+
+    fn get_imap_password(&self, account_id: AccountId) -> CredentialResult<Option<String>> {
+        debug!(
+            "NoopCredentialStore: returning None for IMAP password for account {}",
+            account_id.0
+        );
+        Ok(None)
+    }
+
+    fn get_smtp_password(&self, account_id: AccountId) -> CredentialResult<Option<String>> {
+        debug!(
+            "NoopCredentialStore: returning None for SMTP password for account {}",
+            account_id.0
+        );
+        Ok(None)
+    }
+
+    fn delete_credentials(&self, account_id: AccountId) -> CredentialResult<()> {
+        debug!(
+            "NoopCredentialStore: skipping credential deletion for account {}",
+            account_id.0
+        );
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Standalone functions (kept for backward compatibility and internal use)
+// ============================================================================
 
 /// Generates the keyring entry key for a credential.
 fn credential_key(account_id: AccountId, credential_type: &str) -> String {
@@ -260,7 +428,15 @@ pub fn delete_oauth_token(account_id: AccountId) -> CredentialResult<()> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::redundant_clone, clippy::manual_string_new, clippy::needless_collect, clippy::unreadable_literal, clippy::used_underscore_items, clippy::similar_names)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::redundant_clone,
+    clippy::manual_string_new,
+    clippy::needless_collect,
+    clippy::unreadable_literal,
+    clippy::used_underscore_items,
+    clippy::similar_names
+)]
 mod tests {
     // Note: These tests interact with the actual system keyring.
     // They are marked as ignored by default to avoid polluting the keyring

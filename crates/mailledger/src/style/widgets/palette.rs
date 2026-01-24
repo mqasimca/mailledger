@@ -57,6 +57,13 @@ pub struct Palette {
     // Shadow color
     pub shadow: Color,
     pub shadow_medium: Color,
+
+    // Avatar gradient colors (Air-style)
+    pub avatar_purple: Color,
+    pub avatar_pink: Color,
+    pub avatar_cyan: Color,
+    pub avatar_green: Color,
+    pub avatar_orange: Color,
 }
 
 impl Palette {
@@ -106,55 +113,69 @@ impl Palette {
             // Shadows - Soft, natural depth
             shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.04), // Very soft
             shadow_medium: Color::from_rgba(0.0, 0.0, 0.0, 0.08), // Medium soft
+
+            // Avatar colors (Air-style gradients - use primary color)
+            avatar_purple: Color::from_rgb(0.388, 0.400, 0.945), // #6366f1
+            avatar_pink: Color::from_rgb(0.925, 0.286, 0.600),   // #ec4899
+            avatar_cyan: Color::from_rgb(0.024, 0.714, 0.831),   // #06b6d4
+            avatar_green: Color::from_rgb(0.063, 0.725, 0.506),  // #10b981
+            avatar_orange: Color::from_rgb(0.961, 0.620, 0.043), // #f59e0b
         }
     }
 
     /// Creates the dark theme palette.
     ///
-    /// Futuristic cyber design with neon accents and glassmorphism.
-    /// Inspired by modern UI/UX trends: Arc browser, Linear, Raycast.
+    /// "Obsidian Velocity" - Premium dark theme inspired by Nylas Air.
+    /// Deep blacks with electric indigo accent for a refined, modern feel.
     #[must_use]
     pub const fn dark() -> Self {
         Self {
-            // Primary - Bright teal like terminal/CLI interfaces
-            primary: Color::from_rgb(0.0, 1.0, 0.8), // #00FFCC - bright teal
-            primary_light: Color::from_rgb(0.2, 1.0, 0.85),
-            primary_dark: Color::from_rgb(0.0, 0.8, 0.65),
+            // Primary - Electric indigo (Air's signature color)
+            primary: Color::from_rgb(0.388, 0.400, 0.945), // #6366f1 - indigo
+            primary_light: Color::from_rgb(0.506, 0.549, 0.972), // #818cf8 - lighter
+            primary_dark: Color::from_rgb(0.310, 0.275, 0.898), // #4f46e5 - darker
 
-            // Surfaces - Lighter dark theme, more visible
-            surface: Color::from_rgb(0.12, 0.13, 0.15), // Lighter card
-            surface_elevated: Color::from_rgb(0.15, 0.16, 0.18), // Elevated
-            surface_sunken: Color::from_rgb(0.10, 0.11, 0.13), // Recessed
-            background: Color::from_rgb(0.08, 0.09, 0.11), // Lighter background
-            background_secondary: Color::from_rgb(0.10, 0.11, 0.13),
+            // Surfaces - Deep obsidian blacks
+            surface: Color::from_rgb(0.067, 0.067, 0.078), // #111114 - cards
+            surface_elevated: Color::from_rgb(0.094, 0.094, 0.110), // #18181c - elevated
+            surface_sunken: Color::from_rgb(0.039, 0.039, 0.047), // #0a0a0c - deepest
+            background: Color::from_rgb(0.039, 0.039, 0.047), // #0a0a0c - main bg
+            background_secondary: Color::from_rgb(0.067, 0.067, 0.078), // #111114
 
-            // Text - High contrast for readability
-            text_primary: Color::from_rgb(0.92, 0.93, 0.95), // Near white
-            text_secondary: Color::from_rgb(0.65, 0.68, 0.72), // Lighter muted gray
-            text_muted: Color::from_rgb(0.50, 0.53, 0.58),   // More visible
-            text_on_primary: Color::from_rgb(0.08, 0.09, 0.11), // Dark on teal
+            // Text - Clear hierarchy with warm whites
+            text_primary: Color::from_rgb(0.957, 0.957, 0.961), // #f4f4f5
+            text_secondary: Color::from_rgb(0.631, 0.631, 0.667), // #a1a1aa
+            text_muted: Color::from_rgb(0.443, 0.443, 0.478),   // #71717a
+            text_on_primary: Color::WHITE,                      // White on indigo
 
-            // Accents - Terminal-inspired colors
-            accent_blue: Color::from_rgb(0.3, 0.7, 1.0), // Bright blue
-            accent_green: Color::from_rgb(0.2, 0.9, 0.5), // Terminal green
-            accent_yellow: Color::from_rgb(1.0, 0.85, 0.2), // Terminal yellow
-            accent_red: Color::from_rgb(1.0, 0.35, 0.4), // Bright red
-            accent_purple: Color::from_rgb(0.7, 0.4, 1.0), // Bright purple
+            // Accents - Air's color-coded action system
+            accent_blue: Color::from_rgb(0.231, 0.510, 0.965), // #3b82f6 - info
+            accent_green: Color::from_rgb(0.133, 0.773, 0.369), // #22c55e - archive/success
+            accent_yellow: Color::from_rgb(0.961, 0.620, 0.043), // #f59e0b - snooze/warning
+            accent_red: Color::from_rgb(0.937, 0.267, 0.267),  // #ef4444 - delete/error
+            accent_purple: Color::from_rgb(0.545, 0.361, 0.965), // #8b5cf6 - violet accent
 
-            // States - Visible highlighting, terminal style
-            selected: Color::from_rgb(0.10, 0.18, 0.20), // Teal-tinted selection
-            selected_border: Color::from_rgb(0.0, 1.0, 0.8), // Bright teal border
-            hover: Color::from_rgb(0.14, 0.15, 0.17),    // Visible hover
-            unread: Color::from_rgb(0.0, 1.0, 0.8),      // Bright teal indicator
+            // States - Indigo-tinted selections
+            selected: Color::from_rgb(0.094, 0.094, 0.125), // Subtle indigo tint
+            selected_border: Color::from_rgb(0.388, 0.400, 0.945), // Indigo border
+            hover: Color::from_rgb(0.133, 0.133, 0.157),    // #222228
+            unread: Color::from_rgb(0.388, 0.400, 0.945),   // Indigo indicator
 
-            // Borders - More visible
-            border_subtle: Color::from_rgb(0.20, 0.21, 0.24), // Subtle but visible
-            border_medium: Color::from_rgb(0.28, 0.29, 0.32), // Medium
-            border_strong: Color::from_rgb(0.40, 0.42, 0.45), // Stronger
+            // Borders - Subtle but defined
+            border_subtle: Color::from_rgb(0.133, 0.133, 0.157), // #222228
+            border_medium: Color::from_rgb(0.165, 0.165, 0.196), // #2a2a32
+            border_strong: Color::from_rgb(0.224, 0.224, 0.255), // #393941
 
-            // Shadows - Minimal (terminals don't have heavy shadows)
-            shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.20), // Dark shadow
-            shadow_medium: Color::from_rgba(0.0, 0.0, 0.0, 0.30), // Medium shadow
+            // Shadows - Soft depth
+            shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.25),
+            shadow_medium: Color::from_rgba(0.0, 0.0, 0.0, 0.40),
+
+            // Avatar colors (Air-style - vibrant on dark)
+            avatar_purple: Color::from_rgb(0.388, 0.400, 0.945), // #6366f1
+            avatar_pink: Color::from_rgb(0.925, 0.286, 0.600),   // #ec4899
+            avatar_cyan: Color::from_rgb(0.024, 0.714, 0.831),   // #06b6d4
+            avatar_green: Color::from_rgb(0.063, 0.725, 0.506),  // #10b981
+            avatar_orange: Color::from_rgb(0.961, 0.620, 0.043), // #f59e0b
         }
     }
 

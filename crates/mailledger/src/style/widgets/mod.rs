@@ -24,15 +24,15 @@ pub use shadows::{
 
 // Re-export container styles
 pub use containers::{
-    card_style, header_style, message_content_style, message_header_style, message_list_style,
-    message_row_border_style, message_row_selected_style, message_row_style, selected_style,
-    sidebar_style, toolbar_style,
+    card_style, elevated_card_style, header_style, message_content_style, message_header_style,
+    message_list_style, message_row_border_style, message_row_selected_style, message_row_style,
+    selected_style, sidebar_style, toolbar_style,
 };
 
 // Re-export button styles
 pub use buttons::{
-    folder_button_selected_style, folder_button_style, message_button_style, primary_button_style,
-    secondary_button_style, toolbar_button_style,
+    folder_button_selected_style, folder_button_style, ghost_button_style, message_button_style,
+    primary_button_style, secondary_button_style, toolbar_button_style,
 };
 
 // Re-export input styles

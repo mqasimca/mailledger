@@ -1,7 +1,5 @@
 //! Implementation for the not-authenticated state.
 
-use std::marker::PhantomData;
-
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::Client;
@@ -53,7 +51,7 @@ where
             stream: framed,
             tag_gen: TagGenerator::default(),
             capabilities,
-            _state: PhantomData,
+            state: NotAuthenticated,
         })
     }
 
@@ -91,7 +89,7 @@ where
             stream: self.stream,
             tag_gen: self.tag_gen,
             capabilities: self.capabilities,
-            _state: PhantomData,
+            state: Authenticated,
         })
     }
 
@@ -137,7 +135,7 @@ where
             stream: self.stream,
             tag_gen: self.tag_gen,
             capabilities: self.capabilities,
-            _state: PhantomData,
+            state: Authenticated,
         })
     }
 
@@ -180,7 +178,7 @@ where
             stream: self.stream,
             tag_gen: self.tag_gen,
             capabilities: self.capabilities,
-            _state: PhantomData,
+            state: Authenticated,
         })
     }
 
@@ -223,7 +221,7 @@ where
             stream: self.stream,
             tag_gen: self.tag_gen,
             capabilities: self.capabilities,
-            _state: PhantomData,
+            state: Authenticated,
         })
     }
 

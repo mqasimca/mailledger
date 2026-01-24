@@ -4,7 +4,7 @@ use iced::widget::{Space, button, column, container, row, scrollable, text, togg
 use iced::{Element, Length};
 
 use crate::message::{Message, SettingsMessage, View};
-use crate::model::{SettingsSection, SettingsState};
+use crate::model::{FontSize, ListDensity, SettingsSection, SettingsState};
 use crate::style::widgets::palette::{self, ThemeMode};
 
 /// Renders the settings view.
@@ -12,6 +12,8 @@ pub fn view_settings(
     state: &SettingsState,
     account: Option<&mailledger_core::Account>,
     theme_mode: ThemeMode,
+    font_size: FontSize,
+    list_density: ListDensity,
 ) -> Element<'static, Message> {
     let p = palette::current();
 
@@ -32,7 +34,7 @@ pub fn view_settings(
     // Content based on selected section
     let content: Element<'static, Message> = match state.selected_section {
         SettingsSection::Account => view_account_section(account),
-        SettingsSection::Appearance => view_appearance_section(theme_mode),
+        SettingsSection::Appearance => view_appearance_section(theme_mode, font_size, list_density),
         SettingsSection::About => view_about_section(),
     };
 
@@ -230,8 +232,12 @@ fn view_account_section(account: Option<&mailledger_core::Account>) -> Element<'
     .into()
 }
 
-/// Appearance settings section with theme toggle.
-fn view_appearance_section(theme_mode: ThemeMode) -> Element<'static, Message> {
+/// Appearance settings section with theme toggle, font size, and density pickers.
+fn view_appearance_section(
+    theme_mode: ThemeMode,
+    font_size: FontSize,
+    list_density: ListDensity,
+) -> Element<'static, Message> {
     let p = palette::current();
     let is_dark = theme_mode == ThemeMode::Dark;
 
@@ -259,6 +265,48 @@ fn view_appearance_section(theme_mode: ThemeMode) -> Element<'static, Message> {
     .size(12)
     .color(p.text_muted);
 
+    // Font size picker
+    let font_size_picker = row![
+        text("Font Size")
+            .size(14)
+            .color(p.text_secondary)
+            .width(Length::Fixed(120.0)),
+        font_size_button("Small", FontSize::Small, font_size),
+        font_size_button("Medium", FontSize::Medium, font_size),
+        font_size_button("Large", FontSize::Large, font_size),
+    ]
+    .spacing(8)
+    .align_y(iced::Alignment::Center);
+
+    let font_description = text(match font_size {
+        FontSize::Small => "Compact text for more content on screen",
+        FontSize::Medium => "Balanced text size for comfortable reading",
+        FontSize::Large => "Larger text for improved readability",
+    })
+    .size(12)
+    .color(p.text_muted);
+
+    // List density picker
+    let density_picker = row![
+        text("Density")
+            .size(14)
+            .color(p.text_secondary)
+            .width(Length::Fixed(120.0)),
+        density_button("Compact", ListDensity::Compact, list_density),
+        density_button("Comfortable", ListDensity::Comfortable, list_density),
+        density_button("Spacious", ListDensity::Spacious, list_density),
+    ]
+    .spacing(8)
+    .align_y(iced::Alignment::Center);
+
+    let density_description = text(match list_density {
+        ListDensity::Compact => "Fit more messages on screen",
+        ListDensity::Comfortable => "Balanced spacing for easy reading",
+        ListDensity::Spacious => "More room between messages",
+    })
+    .size(12)
+    .color(p.text_muted);
+
     column![
         text("Appearance").size(20).color(p.text_primary),
         Space::new().height(Length::Fixed(16.0)),
@@ -268,20 +316,58 @@ fn view_appearance_section(theme_mode: ThemeMode) -> Element<'static, Message> {
         Space::new().height(Length::Fixed(24.0)),
         text("Display Options").size(16).color(p.text_primary),
         Space::new().height(Length::Fixed(12.0)),
-        text("Font size: Medium (default)")
-            .size(14)
-            .color(p.text_secondary),
+        font_size_picker,
         Space::new().height(Length::Fixed(8.0)),
-        text("Message density: Comfortable")
-            .size(14)
-            .color(p.text_secondary),
+        font_description,
         Space::new().height(Length::Fixed(16.0)),
-        text("More appearance options coming soon.")
-            .size(12)
-            .color(p.text_muted),
+        density_picker,
+        Space::new().height(Length::Fixed(8.0)),
+        density_description,
     ]
     .spacing(4)
     .into()
+}
+
+/// Creates a font size selection button.
+fn font_size_button(label: &str, size: FontSize, current: FontSize) -> Element<'static, Message> {
+    let is_active = size == current;
+    let label_owned = label.to_string();
+
+    button(text(label_owned).size(13))
+        .padding([6, 14])
+        .style(move |theme, status| {
+            let p = palette::current();
+            if is_active {
+                primary_button_style_themed(&p, theme, status)
+            } else {
+                secondary_button_style_themed(&p, theme, status)
+            }
+        })
+        .on_press(Message::Settings(SettingsMessage::SetFontSize(size)))
+        .into()
+}
+
+/// Creates a list density selection button.
+fn density_button(
+    label: &str,
+    density: ListDensity,
+    current: ListDensity,
+) -> Element<'static, Message> {
+    let is_active = density == current;
+    let label_owned = label.to_string();
+
+    button(text(label_owned).size(13))
+        .padding([6, 14])
+        .style(move |theme, status| {
+            let p = palette::current();
+            if is_active {
+                primary_button_style_themed(&p, theme, status)
+            } else {
+                secondary_button_style_themed(&p, theme, status)
+            }
+        })
+        .on_press(Message::Settings(SettingsMessage::SetDensity(density)))
+        .into()
 }
 
 /// About section.

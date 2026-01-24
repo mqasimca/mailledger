@@ -1,22 +1,26 @@
 //! Account storage repository.
 
+use std::sync::Arc;
+
 use sqlx::Row;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use tracing::{debug, warn};
 
-use super::credentials;
+use super::credentials::{CredentialStore, KeyringCredentialStore, NoopCredentialStore};
 use super::model::{Account, AccountId, ImapConfig, Security, SmtpConfig};
 use crate::Result;
 
 /// Repository for account storage and retrieval.
 pub struct AccountRepository {
     pool: SqlitePool,
+    credential_store: Arc<dyn CredentialStore>,
 }
 
 impl AccountRepository {
     /// Create a new repository with the given database path.
     ///
     /// Creates the database and tables if they don't exist.
+    /// Uses the real system keyring for credential storage.
     ///
     /// # Errors
     ///
@@ -28,12 +32,17 @@ impl AccountRepository {
             .connect(&url)
             .await?;
 
-        let repo = Self { pool };
+        let repo = Self {
+            pool,
+            credential_store: KeyringCredentialStore::arc(),
+        };
         repo.initialize().await?;
         Ok(repo)
     }
 
     /// Create an in-memory repository for testing.
+    ///
+    /// Uses a no-op credential store to avoid polluting the real system keyring.
     ///
     /// # Errors
     ///
@@ -44,7 +53,10 @@ impl AccountRepository {
             .connect("sqlite::memory:")
             .await?;
 
-        let repo = Self { pool };
+        let repo = Self {
+            pool,
+            credential_store: NoopCredentialStore::arc(),
+        };
         repo.initialize().await?;
         Ok(repo)
     }
@@ -98,7 +110,7 @@ impl AccountRepository {
         .fetch_all(&self.pool)
         .await?;
 
-        let accounts = rows.iter().map(row_to_account).collect();
+        let accounts = rows.iter().map(|row| self.row_to_account(row)).collect();
         Ok(accounts)
     }
 
@@ -122,7 +134,7 @@ impl AccountRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.as_ref().map(row_to_account))
+        Ok(row.as_ref().map(|r| self.row_to_account(r)))
     }
 
     /// Get the default account.
@@ -145,7 +157,7 @@ impl AccountRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.as_ref().map(row_to_account))
+        Ok(row.as_ref().map(|r| self.row_to_account(r)))
     }
 
     /// Save an account (insert or update).
@@ -192,8 +204,12 @@ impl AccountRepository {
             .execute(&self.pool)
             .await?;
 
-            // Store passwords in keyring
-            store_passwords_in_keyring(id, &account.imap.password, &account.smtp.password)?;
+            // Store passwords in credential store
+            self.credential_store
+                .store_imap_password(id, &account.imap.password)?;
+            self.credential_store
+                .store_smtp_password(id, &account.smtp.password)?;
+            debug!("Stored credentials for account {}", id.0);
         } else {
             // Insert new
             let result = sqlx::query(
@@ -225,8 +241,12 @@ impl AccountRepository {
             let new_id = AccountId::new(result.last_insert_rowid());
             account.id = Some(new_id);
 
-            // Store passwords in keyring
-            store_passwords_in_keyring(new_id, &account.imap.password, &account.smtp.password)?;
+            // Store passwords in credential store
+            self.credential_store
+                .store_imap_password(new_id, &account.imap.password)?;
+            self.credential_store
+                .store_smtp_password(new_id, &account.smtp.password)?;
+            debug!("Stored credentials for new account {}", new_id.0);
         }
 
         // If this account is default, unset others
@@ -255,120 +275,102 @@ impl AccountRepository {
             .execute(&self.pool)
             .await?;
 
-        // Delete credentials from keyring
-        if let Err(e) = credentials::delete_credentials(id) {
-            warn!("Failed to delete credentials from keyring: {e}");
+        // Delete credentials from credential store
+        if let Err(e) = self.credential_store.delete_credentials(id) {
+            warn!("Failed to delete credentials: {e}");
         }
 
         Ok(())
     }
-}
 
-/// Convert a database row to an Account.
-///
-/// Loads passwords from the system keyring first, falling back to database
-/// values for backward compatibility with existing accounts.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn row_to_account(row: &sqlx::sqlite::SqliteRow) -> Account {
-    let id = AccountId::new(row.get("id"));
+    /// Load passwords from credential store with fallback to database.
+    fn load_passwords_for_account(
+        &self,
+        account_id: AccountId,
+        row: &sqlx::sqlite::SqliteRow,
+    ) -> (String, String) {
+        // Try credential store first
+        let imap_password = match self.credential_store.get_imap_password(account_id) {
+            Ok(Some(pass)) => {
+                debug!(
+                    "Loaded IMAP password from credential store for account {}",
+                    account_id.0
+                );
+                pass
+            }
+            Ok(None) => {
+                // Fall back to database (for migration)
+                let db_pass: String = row.get("imap_password");
+                if !db_pass.is_empty() {
+                    debug!(
+                        "Using IMAP password from database for account {} (migration needed)",
+                        account_id.0
+                    );
+                }
+                db_pass
+            }
+            Err(e) => {
+                warn!("Failed to load IMAP password from credential store: {e}");
+                row.get("imap_password")
+            }
+        };
 
-    // Try to load passwords from keyring, fall back to DB for migration
-    let (imap_password, smtp_password) = load_passwords_from_keyring(id, row);
+        let smtp_password = match self.credential_store.get_smtp_password(account_id) {
+            Ok(Some(pass)) => {
+                debug!(
+                    "Loaded SMTP password from credential store for account {}",
+                    account_id.0
+                );
+                pass
+            }
+            Ok(None) => {
+                let db_pass: String = row.get("smtp_password");
+                if !db_pass.is_empty() {
+                    debug!(
+                        "Using SMTP password from database for account {} (migration needed)",
+                        account_id.0
+                    );
+                }
+                db_pass
+            }
+            Err(e) => {
+                warn!("Failed to load SMTP password from credential store: {e}");
+                row.get("smtp_password")
+            }
+        };
 
-    Account {
-        id: Some(id),
-        name: row.get("name"),
-        email: row.get("email"),
-        imap: ImapConfig {
-            host: row.get("imap_host"),
-            port: row.get::<i64, _>("imap_port") as u16,
-            security: string_to_security(row.get("imap_security")),
-            username: row.get("imap_username"),
-            password: imap_password,
-        },
-        smtp: SmtpConfig {
-            host: row.get("smtp_host"),
-            port: row.get::<i64, _>("smtp_port") as u16,
-            security: string_to_security(row.get("smtp_security")),
-            username: row.get("smtp_username"),
-            password: smtp_password,
-        },
-        is_default: row.get::<i64, _>("is_default") != 0,
+        (imap_password, smtp_password)
     }
-}
 
-/// Store passwords securely in the system keyring.
-///
-/// # Errors
-///
-/// Returns an error if storing either password fails.
-fn store_passwords_in_keyring(
-    account_id: AccountId,
-    imap_password: &str,
-    smtp_password: &str,
-) -> crate::Result<()> {
-    credentials::store_imap_password(account_id, imap_password)?;
-    credentials::store_smtp_password(account_id, smtp_password)?;
-    debug!("Stored credentials in keyring for account {}", account_id.0);
-    Ok(())
-}
+    /// Convert a database row to an Account.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn row_to_account(&self, row: &sqlx::sqlite::SqliteRow) -> Account {
+        let id = AccountId::new(row.get("id"));
 
-/// Load passwords from keyring with fallback to database.
-fn load_passwords_from_keyring(
-    account_id: AccountId,
-    row: &sqlx::sqlite::SqliteRow,
-) -> (String, String) {
-    // Try keyring first
-    let imap_password = match credentials::get_imap_password(account_id) {
-        Ok(Some(pass)) => {
-            debug!(
-                "Loaded IMAP password from keyring for account {}",
-                account_id.0
-            );
-            pass
-        }
-        Ok(None) => {
-            // Fall back to database (for migration)
-            let db_pass: String = row.get("imap_password");
-            if !db_pass.is_empty() {
-                debug!(
-                    "Using IMAP password from database for account {} (migration needed)",
-                    account_id.0
-                );
-            }
-            db_pass
-        }
-        Err(e) => {
-            warn!("Failed to load IMAP password from keyring: {e}");
-            row.get("imap_password")
-        }
-    };
+        // Load passwords from credential store, fall back to DB for migration
+        let (imap_password, smtp_password) = self.load_passwords_for_account(id, row);
 
-    let smtp_password = match credentials::get_smtp_password(account_id) {
-        Ok(Some(pass)) => {
-            debug!(
-                "Loaded SMTP password from keyring for account {}",
-                account_id.0
-            );
-            pass
+        Account {
+            id: Some(id),
+            name: row.get("name"),
+            email: row.get("email"),
+            imap: ImapConfig {
+                host: row.get("imap_host"),
+                port: row.get::<i64, _>("imap_port") as u16,
+                security: string_to_security(row.get("imap_security")),
+                username: row.get("imap_username"),
+                password: imap_password,
+            },
+            smtp: SmtpConfig {
+                host: row.get("smtp_host"),
+                port: row.get::<i64, _>("smtp_port") as u16,
+                security: string_to_security(row.get("smtp_security")),
+                username: row.get("smtp_username"),
+                password: smtp_password,
+            },
+            is_default: row.get::<i64, _>("is_default") != 0,
         }
-        Ok(None) => {
-            let db_pass: String = row.get("smtp_password");
-            if !db_pass.is_empty() {
-                debug!(
-                    "Using SMTP password from database for account {} (migration needed)",
-                    account_id.0
-                );
-            }
-            db_pass
-        }
-        Err(e) => {
-            warn!("Failed to load SMTP password from keyring: {e}");
-            row.get("smtp_password")
-        }
-    };
-
-    (imap_password, smtp_password)
+    }
 }
 
 const fn security_to_string(security: Security) -> &'static str {
@@ -388,7 +390,15 @@ fn string_to_security(s: &str) -> Security {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::redundant_clone, clippy::manual_string_new, clippy::needless_collect, clippy::unreadable_literal, clippy::used_underscore_items, clippy::similar_names)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::redundant_clone,
+    clippy::manual_string_new,
+    clippy::needless_collect,
+    clippy::unreadable_literal,
+    clippy::used_underscore_items,
+    clippy::similar_names
+)]
 mod tests {
     use super::*;
 

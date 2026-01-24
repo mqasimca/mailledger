@@ -5,9 +5,21 @@
 //!
 //! - `NotAuthenticated`: Initial state after connection
 //! - `Authenticated`: After successful LOGIN/AUTHENTICATE
-//! - `Selected`: After successful SELECT/EXAMINE
+//! - `Selected`: After successful SELECT/EXAMINE (carries mailbox info)
 //!
 //! Each state only exposes methods that are valid for that state.
+//!
+//! ## Design Notes
+//!
+//! Unlike simpler type-state implementations, our `Selected` state carries
+//! runtime information about the selected mailbox. This follows the pattern
+//! used by `imap-next` and provides better ergonomics:
+//!
+//! ```ignore
+//! let (client, status) = client.select("INBOX").await?;
+//! println!("Selected: {}", client.mailbox()); // "INBOX"
+//! println!("Messages: {}", client.exists());  // From status
+//! ```
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -15,8 +27,6 @@ mod authenticated;
 mod not_authenticated;
 mod selected;
 mod states;
-
-use std::marker::PhantomData;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -30,19 +40,22 @@ use crate::{Error, Result};
 /// IMAP client connection with type-state.
 ///
 /// The type parameter `State` tracks the connection state at compile time.
+/// For `Selected` state, the state carries runtime information about the mailbox.
 pub struct Client<S, State> {
     pub(crate) stream: FramedStream<S>,
     pub(crate) tag_gen: TagGenerator,
     pub(crate) capabilities: Vec<Capability>,
-    _state: PhantomData<State>,
+    /// State data. For marker types this is zero-sized, for `Selected` it holds mailbox info.
+    pub(crate) state: State,
 }
 
 // Manual Debug implementation since FramedStream doesn't implement Debug
-impl<S, State> std::fmt::Debug for Client<S, State> {
+impl<S, State: std::fmt::Debug> std::fmt::Debug for Client<S, State> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client")
             .field("tag_gen", &self.tag_gen)
             .field("capabilities", &self.capabilities)
+            .field("state", &self.state)
             .finish_non_exhaustive()
     }
 }
